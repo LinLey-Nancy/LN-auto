@@ -62,6 +62,7 @@ def action_click_count(action: str) -> int:
 
 
 def box_center(box: MatchBox) -> tuple[int, int]:
+    """Return the match center in recognition-image coordinates used by Maa input."""
     return box.x + box.w // 2, box.y + box.h // 2
 
 

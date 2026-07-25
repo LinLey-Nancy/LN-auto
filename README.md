@@ -22,17 +22,17 @@ python -m venv .venv
 nzm-auto-gui
 ```
 
-桌面端当前支持新建、打开和保存 v2 工作流，添加及排序动作步骤，编辑步骤参数，只读选择目标窗口，选择 Win32 输入兼容策略，并在后台线程中运行或安全停止工作流。运行前会再次显示目标窗口和输入策略确认，不会把 Maa Job 成功直接解释为目标应用已处理输入。
+桌面端当前支持新建、打开和保存 v2 工作流，添加及排序动作步骤，编辑步骤参数，只读选择目标窗口，选择 Win32 输入兼容策略，并在后台线程中运行或安全停止工作流。模板识别步骤可以选择已有模板，也可以按照引导从完整截图框选并创建本地模板；失败策略可设为“再次运行”，持续识别直到成功或用户停止；识别成功后可直接单击、双击或发送按键。延迟步骤支持固定时间和随机范围，键盘步骤支持配置按下持续时间，鼠标移动支持绝对坐标和相对距离。属性名称提供悬浮说明。运行前会再次显示目标窗口和输入策略确认，不会把 Maa Job 成功直接解释为目标应用已处理输入。
 
 v2 工作流也可以从命令行运行：
 
 ```powershell
 nzm-auto workflow-run-v2 `
   --workflow config/workflow.v2.example.json `
-  --input-profile foreground-compatible
+  --input-profile game-foreground-precise
 ```
 
-对于游戏窗口，优先使用 `foreground-compatible`。`background-message` 可能被目标应用忽略，即使 MaaFramework 返回成功；正式工作流仍应使用模板或画面变化验证操作结果。
+对于无边框 FPS/TPS 游戏窗口，优先使用 `game-foreground-precise`：模板命中点会先从识别分辨率换算到原始客户区，再通过 `ClientToScreen` 得到实际屏幕像素；程序会恢复并置顶选中的目标窗口、校验最终鼠标位置，然后发送一次按下/抬起，避免 Maa `Seize` 在多显示器或无边框窗口中二次缩放坐标。该策略会短暂占用物理鼠标。`game-window-message` 只适合已实测接受后台消息的游戏；`foreground-compatible` 保留为 Maa 原生前台输入。目标游戏以管理员权限运行时，自动化 GUI 也必须以管理员权限运行，否则 Windows 会以错误码 5 拒绝截图和输入消息。双击 `start.bat` 会通过隐藏启动器请求管理员权限，接受 UAC 后仍不会显示黑色 CMD 窗口。
 
 也可在安装项目后使用：
 
@@ -83,7 +83,9 @@ nzm-auto run --visible-only
 nzm-auto run --title "标题的一部分"
 ```
 
-该命令会选择窗口、连接 Maa Win32Controller、检查原始画面为 `1920×1080` 且标准识别截图为 `1280×720`、加载资源包并执行 `FrameworkSelfTest`，然后安全释放。任一分辨率不符合要求时会在发送输入前安全失败。自检 Pipeline 使用 `DirectHit + DoNothing`，不会发送输入。任务执行时间超过 `runtime.task_timeout_seconds` 时，程序会请求 Maa 停止任务并安全失败。
+该命令会选择窗口、连接 Maa Win32Controller、按 `controller.capture_scope` 校验截图链路、加载资源包并执行 `FrameworkSelfTest`，然后安全释放。默认 `capture_scope: "window"` 仍会按 `expected_raw_resolution` / `expected_screenshot_resolution` 做严格检查；把这两个字段设为 `null` 可只检查截图长边，或把 `capture_scope` 设为 `"desktop"` 以整张桌面作为识别范围。任一分辨率不符合要求时会在发送输入前安全失败。自检 Pipeline 使用 `DirectHit + DoNothing`，不会发送输入。任务执行时间超过 `runtime.task_timeout_seconds` 时，程序会请求 Maa 停止任务并安全失败。
+
+桌面为 1920×1080 时可使用 `"capture_scope": "desktop"`、`"expected_raw_resolution": null`、`"expected_screenshot_resolution": null`：识别范围是整张桌面，识别图仍按长边缩放到 `1280×720`；命中点会先换算到所选窗口 client，再交给 Maa 点击，命中点落在窗口外时不会发送输入。桌面范围模板要按桌面识别图制作；受保护、独占全屏或反作弊目标仍可能需要窗口范围截图、管理员权限或驱动级输入。
 
 ## 调试文件
 
@@ -134,6 +136,8 @@ nzm-auto template-action --title "逆战" --index 0 --template-roi 200 190 150 3
 ```
 
 执行器仅在 MaaFramework 模板匹配成功后发送输入，并使用匹配框中心而不是固定坐标。默认需要输入 `YES` 确认；可显式传入 `--yes`。目标标注图、操作前后截图、差异图和 JSON 报告均写入 `debug/`。
+
+本地工作流保存在 `projects/`。上传 GitHub 时仓库保留 `projects/.gitkeep` 和 `assets/resource/image/.gitkeep`，但忽略这两个目录中的本地工作流与模板图片，避免上传目标程序配置和用户截图。
 
 ## 配置驱动的顺序工作流
 

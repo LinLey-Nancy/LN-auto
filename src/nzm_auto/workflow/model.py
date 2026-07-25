@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal, TypeAlias
 
 
-FailurePolicy: TypeAlias = Literal["stop", "continue"]
+FailurePolicy: TypeAlias = Literal["stop", "continue", "retry"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,14 +32,20 @@ class StepBase:
 
 @dataclass(frozen=True, slots=True)
 class WaitStep(StepBase):
+    delay_mode: Literal["fixed", "random"] = "fixed"
     duration_ms: int = 0
+    min_duration_ms: int = 0
+    max_duration_ms: int = 0
     kind: Literal["wait"] = field(default="wait", init=False)
 
 
 @dataclass(frozen=True, slots=True)
 class MouseMoveStep(StepBase):
+    move_mode: Literal["absolute", "relative"] = "absolute"
     x: int = 0
     y: int = 0
+    delta_x: int = 0
+    delta_y: int = 0
     kind: Literal["mouse_move"] = field(default="mouse_move", init=False)
 
 
@@ -58,6 +64,7 @@ class MouseClickStep(StepBase):
 class KeyPressStep(StepBase):
     key: str | int = ""
     modifiers: tuple[str | int, ...] = ()
+    hold_ms: int = 50
     kind: Literal["key_press"] = field(default="key_press", init=False)
 
 
@@ -77,6 +84,12 @@ class TemplateMatchStep(StepBase):
     attempts: int = 1
     interval_ms: int = 500
     result_variable: str = ""
+    post_action: Literal["none", "click", "double_click", "key_press"] = "none"
+    post_button: Literal["left", "right", "middle"] = "left"
+    post_action_interval_ms: int = 100
+    post_key: str | int = "ENTER"
+    post_modifiers: tuple[str | int, ...] = ()
+    post_key_hold_ms: int = 50
     kind: Literal["template_match"] = field(default="template_match", init=False)
 
 

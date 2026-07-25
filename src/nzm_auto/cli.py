@@ -237,7 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_run_v2.add_argument(
         "--input-profile",
         choices=tuple(profile.value for profile in InputProfileName),
-        default=InputProfileName.FOREGROUND_COMPATIBLE.value,
+        default=InputProfileName.GAME_FOREGROUND_PRECISE.value,
         help="Win32 input compatibility profile.",
     )
     workflow_run_v2.add_argument(
@@ -864,6 +864,8 @@ def run_workflow_v2_program(args) -> int:
             workspace,
             mouse_input=profile.mouse_method,
             keyboard_input=profile.keyboard_method,
+            mouse_lock_follow=profile.mouse_lock_follow,
+            direct_screen_input=profile.direct_screen_input,
         )
         result = WorkflowEngine(report_event).run(definition, session)
         if result.cancelled:

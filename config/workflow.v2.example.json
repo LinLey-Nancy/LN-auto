@@ -14,11 +14,13 @@
       "id": "find-document",
       "type": "template_match",
       "name": "识别文本文档",
+      "on_failure": "retry",
       "template": "assets/resource/image/replace-with-document-template.png",
       "threshold": 0.8,
       "attempts": 3,
       "interval_ms": 500,
-      "result_variable": "document"
+      "result_variable": "document",
+      "post_action": "none"
     },
     {
       "id": "open-document",
@@ -32,7 +34,8 @@
     {
       "id": "wait-for-editor",
       "type": "wait",
-      "name": "等待编辑器打开",
+      "name": "延迟等待编辑器打开",
+      "delay_mode": "fixed",
       "duration_ms": 1000
     },
     {
@@ -48,7 +51,8 @@
       "type": "key_press",
       "name": "保存文件",
       "key": "S",
-      "modifiers": ["CTRL"]
+      "modifiers": ["CTRL"],
+      "hold_ms": 80
     }
   ]
 }

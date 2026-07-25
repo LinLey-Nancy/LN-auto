@@ -62,10 +62,19 @@ def create_controller(window: WindowInfo, controller_config: dict[str, Any]) -> 
 def connect_controller(
     controller: Win32Controller,
     controller_config: dict[str, Any],
-) -> None:
+) -> tuple[tuple[int, int], tuple[int, int]]:
     job = controller.post_connection().wait()
     if not job.succeeded or not controller.connected:
         raise ControllerConnectionError("MaaFramework failed to connect the Win32 controller.")
+    if controller_config.get("mouse_lock_follow", False):
+        if controller_config["mouse_input"] not in {"PostMessage", "SendMessage"}:
+            raise ControllerConnectionError(
+                "Mouse-lock following requires a message-based Win32 mouse input method."
+            )
+        if not controller.set_mouse_lock_follow(True):
+            raise ControllerConnectionError(
+                "Failed to enable Maa mouse-lock following for the target window."
+            )
 
     screenshot_job = controller.post_screencap().wait()
     if not screenshot_job.succeeded:
@@ -74,21 +83,39 @@ def connect_controller(
         )
     screenshot = screenshot_job.get()
     raw_resolution = tuple(controller.resolution)
-    expected_raw = tuple(controller_config["expected_raw_resolution"])
-    if raw_resolution != expected_raw:
+    if raw_resolution[0] <= 0 or raw_resolution[1] <= 0:
         raise ControllerConnectionError(
-            f"Raw resolution {raw_resolution[0]}x{raw_resolution[1]} does not match "
-            f"required {expected_raw[0]}x{expected_raw[1]}; no input was sent."
+            f"Invalid raw controller resolution {raw_resolution!r}; no input was sent."
         )
 
     screenshot_height, screenshot_width = screenshot.shape[:2]
     screenshot_resolution = (screenshot_width, screenshot_height)
-    expected_screenshot = tuple(controller_config["expected_screenshot_resolution"])
-    if screenshot_resolution != expected_screenshot:
+    if screenshot_width <= 0 or screenshot_height <= 0:
+        raise ControllerConnectionError(
+            f"Invalid screenshot resolution {screenshot_resolution!r}; no input was sent."
+        )
+
+    if controller_config.get("capture_scope", "window") == "window":
+        expected_raw = controller_config.get("expected_raw_resolution")
+        if expected_raw is not None and raw_resolution != tuple(expected_raw):
+            raise ControllerConnectionError(
+                f"Raw resolution {raw_resolution[0]}x{raw_resolution[1]} does not match "
+                f"required {expected_raw[0]}x{expected_raw[1]}; no input was sent."
+            )
+        expected_screenshot = controller_config.get("expected_screenshot_resolution")
+        if expected_screenshot is not None and screenshot_resolution != tuple(expected_screenshot):
+            raise ControllerConnectionError(
+                f"Screenshot resolution {screenshot_width}x{screenshot_height} does not match "
+                f"required {expected_screenshot[0]}x{expected_screenshot[1]}; no input was sent."
+            )
+
+    target_long_side = controller_config["screenshot_target_long_side"]
+    if abs(max(screenshot_resolution) - target_long_side) > 1:
         raise ControllerConnectionError(
             f"Screenshot resolution {screenshot_width}x{screenshot_height} does not match "
-            f"required {expected_screenshot[0]}x{expected_screenshot[1]}; no input was sent."
+            f"target long side {target_long_side}; no input was sent."
         )
+    return raw_resolution, screenshot_resolution
 
 
 def deactivate_controller(controller: Win32Controller) -> None:

@@ -32,6 +32,9 @@ class AutomationSession:
     config: dict[str, Any]
     project_root: Path
     workspace: DebugWorkspace
+    window: WindowInfo | None = None
+    controller_raw_size: tuple[int, int] | None = None
+    controller_image_size: tuple[int, int] | None = None
     _runtime: TaskRuntime | None = field(default=None, init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
@@ -45,6 +48,8 @@ class AutomationSession:
         *,
         mouse_input: str | None = None,
         keyboard_input: str | None = None,
+        mouse_lock_follow: bool | None = None,
+        direct_screen_input: bool | None = None,
     ) -> AutomationSession:
         """Create and connect a controller, cleaning it up on partial failure."""
         controller_config = dict(config["controller"])
@@ -52,10 +57,17 @@ class AutomationSession:
             controller_config["mouse_input"] = mouse_input
         if keyboard_input is not None:
             controller_config["keyboard_input"] = keyboard_input
+        if mouse_lock_follow is not None:
+            controller_config["mouse_lock_follow"] = mouse_lock_follow
+        if direct_screen_input is not None:
+            controller_config["direct_screen_input"] = direct_screen_input
 
         controller = create_controller(window, controller_config)
         try:
-            connect_controller(controller, controller_config)
+            controller_raw_size, controller_image_size = connect_controller(
+                controller,
+                controller_config,
+            )
         except BaseException as error:
             try:
                 deactivate_controller(controller)
@@ -70,6 +82,9 @@ class AutomationSession:
             config=session_config,
             project_root=project_root.resolve(),
             workspace=workspace,
+            window=window,
+            controller_raw_size=controller_raw_size,
+            controller_image_size=controller_image_size,
         )
 
     @property

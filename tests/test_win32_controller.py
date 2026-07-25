@@ -32,6 +32,7 @@ class _FakeController:
         screenshot_resolution: tuple[int, int] = (1280, 720),
     ) -> None:
         self.resolution = raw_resolution
+        self.mouse_lock_follow: bool | None = None
         width, height = screenshot_resolution
         self.screenshot = numpy.zeros((height, width, 3), dtype=numpy.uint8)
 
@@ -41,10 +42,21 @@ class _FakeController:
     def post_screencap(self):
         return _SuccessfulJob(self.screenshot)
 
+    def set_mouse_lock_follow(self, enabled: bool):
+        self.mouse_lock_follow = enabled
+        return True
+
 
 CONTROLLER_CONFIG = {
+    "screenshot_target_long_side": 1280,
     "expected_raw_resolution": [1920, 1080],
     "expected_screenshot_resolution": [1280, 720],
+}
+
+AUTO_CONTROLLER_CONFIG = {
+    "screenshot_target_long_side": 1280,
+    "expected_raw_resolution": None,
+    "expected_screenshot_resolution": None,
 }
 
 
@@ -71,3 +83,41 @@ class Win32ControllerConfigTests(unittest.TestCase):
         controller = _FakeController(screenshot_resolution=(1280, 800))
         with self.assertRaisesRegex(ControllerConnectionError, "Screenshot resolution"):
             connect_controller(controller, CONTROLLER_CONFIG)
+
+    def test_auto_resolution_allows_other_raw_sizes(self) -> None:
+        controller = _FakeController(raw_resolution=(2560, 1440))
+
+        raw, screenshot = connect_controller(controller, AUTO_CONTROLLER_CONFIG)
+
+        self.assertEqual(raw, (2560, 1440))
+        self.assertEqual(screenshot, (1280, 720))
+
+    def test_auto_resolution_still_checks_screenshot_long_side(self) -> None:
+        controller = _FakeController(screenshot_resolution=(1920, 1080))
+        with self.assertRaisesRegex(ControllerConnectionError, "target long side"):
+            connect_controller(controller, AUTO_CONTROLLER_CONFIG)
+
+    def test_desktop_scope_skips_window_raw_requirement(self) -> None:
+        config = {
+            "screenshot_target_long_side": 1280,
+            "capture_scope": "desktop",
+            "expected_raw_resolution": [1920, 1080],
+            "expected_screenshot_resolution": [1280, 720],
+        }
+        controller = _FakeController(raw_resolution=(1366, 768))
+
+        raw, _ = connect_controller(controller, config)
+
+        self.assertEqual(raw, (1366, 768))
+
+    def test_mouse_lock_follow_is_enabled_after_connection(self) -> None:
+        config = {
+            **CONTROLLER_CONFIG,
+            "mouse_input": "PostMessage",
+            "mouse_lock_follow": True,
+        }
+        controller = _FakeController()
+
+        connect_controller(controller, config)
+
+        self.assertTrue(controller.mouse_lock_follow)

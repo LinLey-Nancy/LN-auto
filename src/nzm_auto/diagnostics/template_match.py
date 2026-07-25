@@ -32,6 +32,8 @@ class TemplateRecognitionResult:
     hit: bool
     score: float | None
     box: MatchBox | None
+    candidate_score: float | None = None
+    candidate_box: MatchBox | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +53,22 @@ def match_box_from_raw(raw_box) -> MatchBox:
     if isinstance(raw_box, dict) and all(name in raw_box for name in ("x", "y", "w", "h")):
         return MatchBox(*(int(raw_box[name]) for name in ("x", "y", "w", "h")))
     raise TemplateMatchDiagnosticError(f"Unsupported Maa match box: {raw_box!r}.")
+
+
+def best_template_candidate(results) -> tuple[float | None, MatchBox | None]:
+    """Return the highest-scoring candidate, including below-threshold misses."""
+    best_score: float | None = None
+    best_box: MatchBox | None = None
+    for result in results or ():
+        raw_score = getattr(result, "score", None)
+        raw_box = getattr(result, "box", None)
+        if raw_score is None or raw_box is None:
+            continue
+        score = float(raw_score)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_box = match_box_from_raw(raw_box)
+    return best_score, best_box
 
 
 def crop_template(image: numpy.ndarray, roi: tuple[int, int, int, int]) -> numpy.ndarray:
@@ -100,7 +118,16 @@ def recognize_template(
         box = match_box_from_raw(best_result.box)
         score = float(best_result.score)
 
-    return TemplateRecognitionResult(bool(recognition.hit), score, box)
+    candidate_score, candidate_box = best_template_candidate(
+        getattr(recognition, "all_results", None)
+    )
+    return TemplateRecognitionResult(
+        bool(recognition.hit),
+        score,
+        box,
+        candidate_score,
+        candidate_box,
+    )
 
 
 def run_template_match(

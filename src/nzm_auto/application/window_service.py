@@ -24,6 +24,7 @@ def list_windows(query: WindowQuery | None = None) -> list[WindowInfo]:
         title_filter=query.title,
         class_filter=query.class_name,
     )
+    windows = [window for window in windows if window.title.strip()]
     if query.visible_only:
         windows = [window for window in windows if window.visible]
     return windows

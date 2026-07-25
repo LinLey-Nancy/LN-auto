@@ -1,9 +1,11 @@
+from types import SimpleNamespace
 import unittest
 
 import numpy
 
 from nzm_auto.diagnostics.template_match import (
     TemplateMatchDiagnosticError,
+    best_template_candidate,
     crop_template,
     match_box_from_raw,
 )
@@ -27,3 +29,14 @@ class TemplateMatchDiagnosticTests(unittest.TestCase):
     def test_list_match_box_from_binding_is_supported(self) -> None:
         box = match_box_from_raw([1, 2, 3, 4])
         self.assertEqual((box.x, box.y, box.w, box.h), (1, 2, 3, 4))
+
+    def test_best_candidate_includes_below_threshold_miss(self) -> None:
+        results = [
+            SimpleNamespace(score=0.41, box=[1, 2, 3, 4]),
+            SimpleNamespace(score=0.67, box=[5, 6, 7, 8]),
+        ]
+
+        score, box = best_template_candidate(results)
+
+        self.assertEqual(score, 0.67)
+        self.assertEqual((box.x, box.y, box.w, box.h), (5, 6, 7, 8))

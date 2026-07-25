@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from nzm_auto.application.session import AutomationSession
-from nzm_auto.workflow.actions import ActionResult, execute_action
+from nzm_auto.workflow.actions import ActionResult, TemplateNotFoundError, execute_action
 from nzm_auto.workflow.context import CancellationToken, ExecutionContext, WorkflowCancelled
 from nzm_auto.workflow.events import WorkflowEvent, WorkflowEventType
 from nzm_auto.workflow.model import WorkflowDefinition
@@ -77,40 +77,64 @@ class WorkflowEngine:
                 if not step.enabled:
                     self._emit(WorkflowEventType.STEP_SKIPPED, definition, step=step)
                     continue
-                self._emit(WorkflowEventType.STEP_STARTED, definition, step=step)
-                try:
-                    action_result: ActionResult = execute_action(step, context)
-                except WorkflowCancelled:
-                    raise
-                except Exception as error:
-                    results.append(
-                        StepRunResult(step_id=step.id, succeeded=False, error=str(error))
-                    )
-                    self._emit(
-                        WorkflowEventType.STEP_FAILED,
-                        definition,
-                        step=step,
-                        message=str(error),
-                    )
-                    should_stop = definition.settings.stop_on_error and step.on_failure == "stop"
-                    if should_stop:
-                        raise WorkflowExecutionError(
-                            f"Step {step.name!r} failed: {error}"
-                        ) from error
-                    continue
-                results.append(
-                    StepRunResult(
-                        step_id=step.id,
-                        succeeded=True,
-                        output=action_result.output,
-                    )
-                )
-                self._emit(
-                    WorkflowEventType.STEP_SUCCEEDED,
-                    definition,
-                    step=step,
-                    details={"output": action_result.output},
-                )
+                retry_count = 0
+                while True:
+                    self._emit(WorkflowEventType.STEP_STARTED, definition, step=step)
+                    try:
+                        action_result: ActionResult = execute_action(step, context)
+                    except WorkflowCancelled:
+                        raise
+                    except Exception as error:
+                        if (
+                            step.on_failure == "retry"
+                            and isinstance(error, TemplateNotFoundError)
+                        ):
+                            retry_count += 1
+                            retry_delay_ms = int(getattr(step, "interval_ms", 0))
+                            self._emit(
+                                WorkflowEventType.STEP_FAILED,
+                                definition,
+                                step=step,
+                                message=(
+                                    f"{error} 将在 {retry_delay_ms} 毫秒后再次运行"
+                                    f"（第 {retry_count} 次）。"
+                                ),
+                                details={"retry_count": retry_count},
+                            )
+                            cancellation.wait(retry_delay_ms / 1000.0)
+                            continue
+                        results.append(
+                            StepRunResult(step_id=step.id, succeeded=False, error=str(error))
+                        )
+                        self._emit(
+                            WorkflowEventType.STEP_FAILED,
+                            definition,
+                            step=step,
+                            message=str(error),
+                        )
+                        should_stop = definition.settings.stop_on_error and (
+                            step.on_failure in {"stop", "retry"}
+                        )
+                        if should_stop:
+                            raise WorkflowExecutionError(
+                                f"Step {step.name!r} failed: {error}"
+                            ) from error
+                        break
+                    else:
+                        results.append(
+                            StepRunResult(
+                                step_id=step.id,
+                                succeeded=True,
+                                output=action_result.output,
+                            )
+                        )
+                        self._emit(
+                            WorkflowEventType.STEP_SUCCEEDED,
+                            definition,
+                            step=step,
+                            details={"output": action_result.output},
+                        )
+                        break
         except WorkflowCancelled:
             self._emit(WorkflowEventType.WORKFLOW_CANCELLED, definition)
             return WorkflowRunResult(definition.name, tuple(results), cancelled=True)

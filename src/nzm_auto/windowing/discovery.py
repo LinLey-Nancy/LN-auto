@@ -20,6 +20,8 @@ class WindowInfo:
     client_height: int | None
     visible: bool
     minimized: bool
+    client_x: int | None = None
+    client_y: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -47,6 +49,13 @@ def _rect_size(user32: Any, function_name: str, hwnd: int) -> tuple[int | None, 
     if not function(wintypes.HWND(hwnd), ctypes.byref(rect)):
         return None, None
     return max(0, rect.right - rect.left), max(0, rect.bottom - rect.top)
+
+
+def _client_origin(user32: Any, hwnd: int) -> tuple[int | None, int | None]:
+    point = wintypes.POINT(0, 0)
+    if not user32.ClientToScreen(wintypes.HWND(hwnd), ctypes.byref(point)):
+        return None, None
+    return int(point.x), int(point.y)
 
 
 def matches_filters(
@@ -79,12 +88,15 @@ def find_windows(
     user32.IsWindowVisible.restype = wintypes.BOOL
     user32.IsIconic.argtypes = [wintypes.HWND]
     user32.IsIconic.restype = wintypes.BOOL
+    user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+    user32.ClientToScreen.restype = wintypes.BOOL
 
     windows: list[WindowInfo] = []
     for desktop_window in Toolkit.find_desktop_windows():
         hwnd = _handle_value(desktop_window.hwnd)
         window_width, window_height = _rect_size(user32, "GetWindowRect", hwnd)
         client_width, client_height = _rect_size(user32, "GetClientRect", hwnd)
+        client_x, client_y = _client_origin(user32, hwnd)
         info = WindowInfo(
             hwnd=hwnd,
             title=desktop_window.window_name,
@@ -95,6 +107,8 @@ def find_windows(
             client_height=client_height,
             visible=bool(user32.IsWindowVisible(wintypes.HWND(hwnd))),
             minimized=bool(user32.IsIconic(wintypes.HWND(hwnd))),
+            client_x=client_x,
+            client_y=client_y,
         )
         if matches_filters(info, title_filter, class_filter):
             windows.append(info)

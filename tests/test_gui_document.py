@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from nzm_auto.gui.document import WorkflowDocument
+from nzm_auto.workflow.loader import load_workflow_v2
 
 
 class WorkflowDocumentTests(unittest.TestCase):
@@ -47,6 +48,29 @@ class WorkflowDocumentTests(unittest.TestCase):
             self.assertEqual(loaded.steps[0]["type"], "wait")
             self.assertFalse(loaded.dirty)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], 2)
+
+    def test_unbound_target_round_trips_as_no_target(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "workflow.json"
+            document = WorkflowDocument()
+            document.add_step("wait")
+            document.save(path)
+
+            definition = load_workflow_v2(path, root)
+            loaded = WorkflowDocument.load(path, root)
+
+            self.assertIsNone(definition.target)
+            self.assertEqual(loaded.data["target"]["title_pattern"], "")
+
+    def test_random_delay_range_is_validated_during_editing(self) -> None:
+        document = WorkflowDocument()
+        index = document.add_step("wait")
+
+        with self.assertRaisesRegex(ValueError, "最短延迟"):
+            document.update_step(index, "min_duration_ms", 900)
+        with self.assertRaisesRegex(ValueError, "最长延迟"):
+            document.update_step(index, "max_duration_ms", 200)
 
 
 if __name__ == "__main__":

@@ -10,8 +10,10 @@ from typing import Any
 REQUIRED_TOP_LEVEL_KEYS = {"window", "controller", "runtime", "diagnostics"}
 
 
-def _positive_resolution(config: dict[str, Any], key: str) -> list[int]:
+def _optional_positive_resolution(config: dict[str, Any], key: str) -> list[int] | None:
     value = config.get(key)
+    if value is None:
+        return None
     if not (
         isinstance(value, list)
         and len(value) == 2
@@ -22,7 +24,7 @@ def _positive_resolution(config: dict[str, Any], key: str) -> list[int]:
             for component in value
         )
     ):
-        raise ValueError(f"controller.{key} must be two positive integers.")
+        raise ValueError(f"controller.{key} must be null or two positive integers.")
     return value
 
 
@@ -53,8 +55,17 @@ def load_config(path: Path) -> dict[str, Any]:
         or screenshot_target_long_side <= 0
     ):
         raise ValueError("controller.screenshot_target_long_side must be a positive integer.")
-    _positive_resolution(config["controller"], "expected_raw_resolution")
-    _positive_resolution(config["controller"], "expected_screenshot_resolution")
+    capture_scope = config["controller"].get("capture_scope", "window")
+    if capture_scope not in {"window", "desktop"}:
+        raise ValueError("controller.capture_scope must be 'window' or 'desktop'.")
+    mouse_lock_follow = config["controller"].get("mouse_lock_follow", False)
+    if not isinstance(mouse_lock_follow, bool):
+        raise ValueError("controller.mouse_lock_follow must be a boolean.")
+    direct_screen_input = config["controller"].get("direct_screen_input", False)
+    if not isinstance(direct_screen_input, bool):
+        raise ValueError("controller.direct_screen_input must be a boolean.")
+    _optional_positive_resolution(config["controller"], "expected_raw_resolution")
+    _optional_positive_resolution(config["controller"], "expected_screenshot_resolution")
 
     debug_dir = config["diagnostics"].get("debug_dir")
     if not isinstance(debug_dir, str) or not debug_dir.strip():

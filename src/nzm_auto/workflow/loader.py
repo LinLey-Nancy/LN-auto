@@ -27,10 +27,15 @@ class WorkflowV2ConfigError(RuntimeError):
 _ROOT_FIELDS = {"version", "name", "target", "settings", "steps"}
 _BASE_FIELDS = {"id", "type", "name", "enabled", "on_failure"}
 _TYPE_FIELDS = {
-    "wait": {"duration_ms"},
-    "mouse_move": {"x", "y"},
+    "wait": {
+        "delay_mode",
+        "duration_ms",
+        "min_duration_ms",
+        "max_duration_ms",
+    },
+    "mouse_move": {"move_mode", "x", "y", "delta_x", "delta_y"},
     "mouse_click": {"x", "y", "match_variable", "button", "count", "interval_ms"},
-    "key_press": {"key", "modifiers"},
+    "key_press": {"key", "modifiers", "hold_ms"},
     "text_input": {"text", "strategy", "interval_ms", "sensitive"},
     "template_match": {
         "template",
@@ -38,6 +43,12 @@ _TYPE_FIELDS = {
         "attempts",
         "interval_ms",
         "result_variable",
+        "post_action",
+        "post_button",
+        "post_action_interval_ms",
+        "post_key",
+        "post_modifiers",
+        "post_key_hold_ms",
     },
 }
 
@@ -79,13 +90,53 @@ def _integer(
     return value
 
 
-def _base(data: dict[str, Any], context: str) -> dict[str, Any]:
+def _key_value(
+    data: dict[str, Any],
+    field: str,
+    context: str,
+    *,
+    default: str | int | None = None,
+) -> str | int:
+    value = data.get(field, default)
+    if isinstance(value, bool) or not isinstance(value, (str, int)) or value == "":
+        raise WorkflowV2ConfigError(
+            f"{context}.{field} must be a key name or virtual key code."
+        )
+    return value
+
+
+def _modifiers(
+    data: dict[str, Any],
+    field: str,
+    context: str,
+) -> tuple[str | int, ...]:
+    values = data.get(field, [])
+    if not isinstance(values, list) or any(
+        isinstance(value, bool) or not isinstance(value, (str, int))
+        for value in values
+    ):
+        raise WorkflowV2ConfigError(
+            f"{context}.{field} must be an array of key names/codes."
+        )
+    return tuple(values)
+
+
+def _base(
+    data: dict[str, Any],
+    context: str,
+    *,
+    allow_retry: bool = False,
+) -> dict[str, Any]:
     enabled = data.get("enabled", True)
     if not isinstance(enabled, bool):
         raise WorkflowV2ConfigError(f"{context}.enabled must be a boolean.")
     on_failure = data.get("on_failure", "stop")
-    if on_failure not in {"stop", "continue"}:
-        raise WorkflowV2ConfigError(f"{context}.on_failure must be 'stop' or 'continue'.")
+    allowed_failure_policies = {"stop", "continue"}
+    if allow_retry:
+        allowed_failure_policies.add("retry")
+    if on_failure not in allowed_failure_policies:
+        choices = "'stop', 'continue', or 'retry'" if allow_retry else "'stop' or 'continue'"
+        raise WorkflowV2ConfigError(f"{context}.on_failure must be {choices}.")
     return {
         "id": _string(data, "id", context),
         "name": _string(data, "name", context),
@@ -99,18 +150,67 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
     if step_type not in _TYPE_FIELDS:
         raise WorkflowV2ConfigError(f"{context}.type is unsupported: {step_type!r}.")
     _reject_unknown(data, _BASE_FIELDS | _TYPE_FIELDS[step_type], context)
-    base = _base(data, context)
+    base = _base(data, context, allow_retry=step_type == "template_match")
 
     if step_type == "wait":
+        delay_mode = data.get("delay_mode", "fixed")
+        if delay_mode not in {"fixed", "random"}:
+            raise WorkflowV2ConfigError(
+                f"{context}.delay_mode must be 'fixed' or 'random'."
+            )
+        duration_ms = _integer(data, "duration_ms", context, default=0, minimum=0)
+        min_duration_ms = _integer(
+            data,
+            "min_duration_ms",
+            context,
+            default=duration_ms,
+            minimum=0,
+        )
+        max_duration_ms = _integer(
+            data,
+            "max_duration_ms",
+            context,
+            default=duration_ms,
+            minimum=0,
+        )
+        if min_duration_ms > max_duration_ms:
+            raise WorkflowV2ConfigError(
+                f"{context}.min_duration_ms must not exceed max_duration_ms."
+            )
         return WaitStep(
             **base,
-            duration_ms=_integer(data, "duration_ms", context, minimum=0),
+            delay_mode=delay_mode,
+            duration_ms=duration_ms,
+            min_duration_ms=min_duration_ms,
+            max_duration_ms=max_duration_ms,
         )
     if step_type == "mouse_move":
+        move_mode = data.get("move_mode", "absolute")
+        if move_mode not in {"absolute", "relative"}:
+            raise WorkflowV2ConfigError(
+                f"{context}.move_mode must be 'absolute' or 'relative'."
+            )
         return MouseMoveStep(
             **base,
-            x=_integer(data, "x", context, minimum=0),
-            y=_integer(data, "y", context, minimum=0),
+            move_mode=move_mode,
+            x=_integer(data, "x", context, default=0, minimum=0),
+            y=_integer(data, "y", context, default=0, minimum=0),
+            delta_x=_integer(
+                data,
+                "delta_x",
+                context,
+                default=0,
+                minimum=-1_000_000,
+                maximum=1_000_000,
+            ),
+            delta_y=_integer(
+                data,
+                "delta_y",
+                context,
+                default=0,
+                minimum=-1_000_000,
+                maximum=1_000_000,
+            ),
         )
     if step_type == "mouse_click":
         x = data.get("x")
@@ -142,16 +242,12 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
             interval_ms=_integer(data, "interval_ms", context, default=100, minimum=0),
         )
     if step_type == "key_press":
-        key = data.get("key")
-        if isinstance(key, bool) or not isinstance(key, (str, int)) or key == "":
-            raise WorkflowV2ConfigError(f"{context}.key must be a key name or virtual key code.")
-        modifiers = data.get("modifiers", [])
-        if not isinstance(modifiers, list) or any(
-            isinstance(value, bool) or not isinstance(value, (str, int))
-            for value in modifiers
-        ):
-            raise WorkflowV2ConfigError(f"{context}.modifiers must be an array of key names/codes.")
-        return KeyPressStep(**base, key=key, modifiers=tuple(modifiers))
+        return KeyPressStep(
+            **base,
+            key=_key_value(data, "key", context),
+            modifiers=_modifiers(data, "modifiers", context),
+            hold_ms=_integer(data, "hold_ms", context, default=50, minimum=0),
+        )
     if step_type == "text_input":
         text = data.get("text")
         if not isinstance(text, str):
@@ -190,6 +286,16 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
     threshold = float(threshold)
     if not 0.0 < threshold <= 1.0:
         raise WorkflowV2ConfigError(f"{context}.threshold must be greater than 0 and at most 1.")
+    post_action = data.get("post_action", "none")
+    if post_action not in {"none", "click", "double_click", "key_press"}:
+        raise WorkflowV2ConfigError(
+            f"{context}.post_action must be 'none', 'click', 'double_click', or 'key_press'."
+        )
+    post_button = data.get("post_button", "left")
+    if post_button not in {"left", "right", "middle"}:
+        raise WorkflowV2ConfigError(
+            f"{context}.post_button must be 'left', 'right', or 'middle'."
+        )
     return TemplateMatchStep(
         **base,
         template_path=template,
@@ -197,6 +303,24 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
         attempts=_integer(data, "attempts", context, default=1, minimum=1, maximum=100),
         interval_ms=_integer(data, "interval_ms", context, default=500, minimum=0),
         result_variable=_string(data, "result_variable", context),
+        post_action=post_action,
+        post_button=post_button,
+        post_action_interval_ms=_integer(
+            data,
+            "post_action_interval_ms",
+            context,
+            default=100,
+            minimum=0,
+        ),
+        post_key=_key_value(data, "post_key", context, default="ENTER"),
+        post_modifiers=_modifiers(data, "post_modifiers", context),
+        post_key_hold_ms=_integer(
+            data,
+            "post_key_hold_ms",
+            context,
+            default=50,
+            minimum=0,
+        ),
     )
 
 
@@ -217,13 +341,21 @@ def load_workflow_v2(path: Path, project_root: Path) -> WorkflowDefinition:
     if "target" in root:
         raw_target = _object(root["target"], "workflow.target")
         _reject_unknown(raw_target, {"title_pattern", "class_name"}, "workflow.target")
+        title_pattern = raw_target.get("title_pattern", "")
+        if not isinstance(title_pattern, str):
+            raise WorkflowV2ConfigError(
+                "workflow.target.title_pattern must be a string."
+            )
+        title_pattern = title_pattern.strip()
         class_name = raw_target.get("class_name")
         if class_name is not None and not isinstance(class_name, str):
             raise WorkflowV2ConfigError("workflow.target.class_name must be a string or null.")
-        target = WindowTarget(
-            title_pattern=_string(raw_target, "title_pattern", "workflow.target"),
-            class_name=class_name,
-        )
+        class_name = class_name.strip() if class_name else None
+        if title_pattern or class_name:
+            target = WindowTarget(
+                title_pattern=title_pattern,
+                class_name=class_name,
+            )
 
     settings = WorkflowSettings()
     if "settings" in root:

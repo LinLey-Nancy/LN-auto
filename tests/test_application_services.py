@@ -36,7 +36,18 @@ def _config() -> dict:
 class WindowServiceTests(unittest.TestCase):
     @patch("nzm_auto.application.window_service.find_windows")
     def test_list_windows_applies_query_and_visibility(self, find_windows: Mock) -> None:
-        find_windows.return_value = [_window(1), _window(2, visible=False)]
+        unnamed = _window(3)
+        unnamed = WindowInfo(
+            **{
+                **unnamed.to_dict(),
+                "title": "   ",
+            }
+        )
+        find_windows.return_value = [
+            _window(1),
+            _window(2, visible=False),
+            unnamed,
+        ]
 
         result = list_windows(WindowQuery("title", "class", visible_only=True))
 
@@ -66,7 +77,24 @@ class InputProfileTests(unittest.TestCase):
     def test_background_profile_requires_observable_verification(self) -> None:
         profile = get_input_profile("background-message")
 
-        self.assertIn("ignores synthetic input", profile.warning)
+        self.assertIn("忽略模拟输入", profile.warning)
+
+    def test_game_window_profile_targets_background_locked_mouse_window(self) -> None:
+        profile = get_input_profile(InputProfileName.GAME_WINDOW_MESSAGE)
+
+        self.assertEqual(profile.mouse_method, "PostMessage")
+        self.assertEqual(profile.keyboard_method, "PostMessage")
+        self.assertTrue(profile.supports_background)
+        self.assertTrue(profile.mouse_lock_follow)
+        self.assertFalse(profile.direct_screen_input)
+
+    def test_game_precise_profile_uses_direct_screen_coordinates(self) -> None:
+        profile = get_input_profile(InputProfileName.GAME_FOREGROUND_PRECISE)
+
+        self.assertEqual(profile.mouse_method, "PostMessage")
+        self.assertEqual(profile.keyboard_method, "Seize")
+        self.assertFalse(profile.supports_background)
+        self.assertTrue(profile.direct_screen_input)
 
 
 class AutomationSessionTests(unittest.TestCase):
@@ -79,6 +107,7 @@ class AutomationSessionTests(unittest.TestCase):
     ) -> None:
         controller = Mock()
         create_controller.return_value = controller
+        connect_controller.return_value = ((1920, 1080), (1280, 720))
         workspace = DebugWorkspace(Path("debug"))
 
         session = AutomationSession.connect(
@@ -88,14 +117,23 @@ class AutomationSessionTests(unittest.TestCase):
             workspace,
             mouse_input="Seize",
             keyboard_input="SendMessage",
+            mouse_lock_follow=True,
+            direct_screen_input=True,
         )
 
         used_config = create_controller.call_args.args[1]
         self.assertEqual(used_config["mouse_input"], "Seize")
         self.assertEqual(used_config["keyboard_input"], "SendMessage")
+        self.assertTrue(used_config["mouse_lock_follow"])
+        self.assertTrue(used_config["direct_screen_input"])
         connect_controller.assert_called_once_with(controller, used_config)
         self.assertEqual(session.config["controller"]["mouse_input"], "Seize")
         self.assertEqual(session.config["controller"]["keyboard_input"], "SendMessage")
+        self.assertTrue(session.config["controller"]["mouse_lock_follow"])
+        self.assertTrue(session.config["controller"]["direct_screen_input"])
+        self.assertEqual(session.window.hwnd, 1)
+        self.assertEqual(session.controller_raw_size, (1920, 1080))
+        self.assertEqual(session.controller_image_size, (1280, 720))
 
     @patch("nzm_auto.application.session.load_task_runtime")
     def test_runtime_is_initialized_once(self, load_task_runtime: Mock) -> None:

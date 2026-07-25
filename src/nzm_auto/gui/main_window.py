@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread
+from PySide6.QtCore import QSize, Qt, QThread, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
@@ -32,15 +32,28 @@ from nzm_auto.config.loader import load_config
 from nzm_auto.diagnostics.workspace import create_debug_workspace
 from nzm_auto.gui.document import STEP_LABELS, WorkflowDocument
 from nzm_auto.gui.property_editor import PropertyEditor
+from nzm_auto.gui.template_creator import TemplateCreationDialog
 from nzm_auto.gui.window_dialog import WindowSelectorDialog
 from nzm_auto.gui.worker import WorkflowWorker
 from nzm_auto.windowing.discovery import WindowInfo
-from nzm_auto.workflow.events import WorkflowEvent
+from nzm_auto.workflow.events import WorkflowEvent, WorkflowEventType
 from nzm_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "default.json"
+STARTUP_LOG_PATH = PROJECT_ROOT / "debug" / "startup.log"
+TEMPLATE_DIRECTORY = PROJECT_ROOT / "assets" / "resource" / "image"
+EVENT_LABELS = {
+    WorkflowEventType.WORKFLOW_STARTED: "工作流已开始",
+    WorkflowEventType.STEP_STARTED: "步骤已开始",
+    WorkflowEventType.STEP_SUCCEEDED: "步骤已完成",
+    WorkflowEventType.STEP_FAILED: "步骤失败",
+    WorkflowEventType.STEP_SKIPPED: "步骤已跳过",
+    WorkflowEventType.WORKFLOW_CANCELLED: "工作流已停止",
+    WorkflowEventType.WORKFLOW_FAILED: "工作流失败",
+    WorkflowEventType.WORKFLOW_SUCCEEDED: "工作流已完成",
+}
 
 
 class MainWindow(QMainWindow):
@@ -57,6 +70,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_central()
         self._build_log_dock()
+        self._load_startup_log()
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("就绪")
         self._refresh_document()
@@ -97,13 +111,15 @@ class MainWindow(QMainWindow):
         for name, profile in INPUT_PROFILES.items():
             label = {
                 InputProfileName.BACKGROUND_MESSAGE: "后台消息（兼容性中）",
-                InputProfileName.FOREGROUND_COMPATIBLE: "前台兼容（游戏推荐）",
+                InputProfileName.GAME_WINDOW_MESSAGE: "游戏后台消息（目标需支持）",
+                InputProfileName.GAME_FOREGROUND_PRECISE: "游戏精确点击（推荐）",
+                InputProfileName.FOREGROUND_COMPATIBLE: "前台兼容（需窗口置顶）",
                 InputProfileName.DRIVER_INTERCEPTION: "驱动级（需管理员）",
             }[name]
             self.profile_combo.addItem(label, profile)
         self.profile_combo.setCurrentIndex(
             self.profile_combo.findData(
-                INPUT_PROFILES[InputProfileName.FOREGROUND_COMPATIBLE]
+                INPUT_PROFILES[InputProfileName.GAME_FOREGROUND_PRECISE]
             )
         )
         toolbar.addWidget(self.profile_combo)
@@ -131,6 +147,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._build_steps())
         self.properties = PropertyEditor()
         self.properties.property_changed.connect(self.update_property)
+        self.properties.template_select_requested.connect(self.select_template_file)
+        self.properties.template_create_requested.connect(self.create_template)
         splitter.addWidget(self.properties)
         splitter.setSizes((230, 420, 610))
         splitter.setCollapsible(0, False)
@@ -202,6 +220,21 @@ class MainWindow(QMainWindow):
         dock.setWidget(self.log_view)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
 
+    def _load_startup_log(self) -> None:
+        if not STARTUP_LOG_PATH.is_file():
+            return
+        try:
+            lines = STARTUP_LOG_PATH.read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).splitlines()
+        except OSError as error:
+            self.append_log(f"无法读取启动日志：{error}")
+            return
+        for line in lines:
+            if line.strip():
+                self.append_log(f"启动 · {line}")
+
     def _refresh_document(self, selected_row: int | None = None) -> None:
         self.workflow_name.setText(self.document.name)
         self.step_list.clear()
@@ -247,7 +280,90 @@ class MainWindow(QMainWindow):
             self.document.update_step(index, field, value)
         except ValueError as error:
             QMessageBox.warning(self, "无法更新属性", str(error))
+        # Property changes originate from controls inside PropertyEditor. Rebuilding
+        # the form synchronously here would delete the signal sender while Qt is
+        # still dispatching its signal, which can cause a native use-after-free.
+        QTimer.singleShot(0, lambda row=index: self._refresh_document(row))
+
+    def _set_template_path(self, index: int, path: Path) -> None:
+        if not 0 <= index < len(self.document.steps):
+            return
+        if self.document.steps[index].get("type") != "template_match":
+            return
+        resolved = path.resolve()
+        try:
+            stored_path = resolved.relative_to(PROJECT_ROOT).as_posix()
+        except ValueError:
+            stored_path = resolved.as_posix()
+        self.document.update_step(index, "template", stored_path)
         self._refresh_document(index)
+        self._update_title()
+
+    def select_template_file(self, index: int) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择模板图片",
+            str(TEMPLATE_DIRECTORY),
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)",
+        )
+        if not filename:
+            return
+        self._set_template_path(index, Path(filename))
+        self.statusBar().showMessage(f"已选择模板：{filename}", 5000)
+        self.append_log(f"模板文件已选择：{filename}")
+
+    def create_template(self, index: int) -> None:
+        if not 0 <= index < len(self.document.steps):
+            return
+        guide = (
+            "创建模板需要一张包含目标界面的完整截图。\n\n"
+            "1. 先让目标界面停留在需要识别的画面，并截取原始画面。\n"
+            "2. 在下一步选择这张截图，不要提前缩放图片；保存时会自动换算到识别分辨率。\n"
+            "3. 在截图中拖动框选稳定、清晰且唯一的图形区域。\n"
+            "4. 输入名称后保存；模板会存入项目的本地模板目录。\n\n"
+            "避免框选动画、倒计时、角色名称和会变化的数字。"
+        )
+        QMessageBox.information(self, "模板创建引导", guide)
+
+        screenshot_directory = PROJECT_ROOT / "debug" / "screenshots"
+        if not screenshot_directory.is_dir():
+            screenshot_directory = PROJECT_ROOT
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择用于创建模板的完整截图",
+            str(screenshot_directory),
+            "截图图片 (*.png *.jpg *.jpeg *.bmp *.webp)",
+        )
+        if not filename:
+            return
+        try:
+            recognition_size = None
+            try:
+                config = load_config(DEFAULT_CONFIG_PATH)
+                expected = config["controller"]["expected_screenshot_resolution"]
+                recognition_size = QSize(int(expected[0]), int(expected[1]))
+            except (OSError, ValueError, KeyError, IndexError, TypeError):
+                recognition_size = None
+            dialog = TemplateCreationDialog(
+                Path(filename),
+                TEMPLATE_DIRECTORY,
+                self,
+                recognition_size=recognition_size,
+            )
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, "无法创建模板", str(error))
+            return
+        if not dialog.exec() or dialog.saved_path is None:
+            return
+        self._set_template_path(index, dialog.saved_path)
+        relative_path = dialog.saved_path.relative_to(PROJECT_ROOT).as_posix()
+        if dialog.normalized_for_recognition and dialog.recognition_size is not None:
+            self.append_log(
+                "模板已按识别分辨率 "
+                f"{dialog.recognition_size.width()}×{dialog.recognition_size.height()} 缩放。"
+            )
+        self.statusBar().showMessage(f"模板已创建：{relative_path}", 6000)
+        self.append_log(f"模板已创建并设置到当前步骤：{relative_path}")
 
     def move_step(self, offset: int) -> None:
         row = self.step_list.currentRow()
@@ -292,6 +408,9 @@ class MainWindow(QMainWindow):
         except Exception as error:
             QMessageBox.critical(self, "无法打开工作流", str(error))
             return
+        self.selected_window = None
+        self.target_label.setText("未选择目标窗口")
+        self.target_label.setToolTip("")
         self._refresh_document(0)
         self.statusBar().showMessage(f"已打开 {filename}", 4000)
 
@@ -347,7 +466,7 @@ class MainWindow(QMainWindow):
         profile = self.profile_combo.currentData()
         warning = (
             f"目标：{self.selected_window.title}\n"
-            f"输入策略：{profile.name.value}\n\n"
+            f"输入策略：{self.profile_combo.currentText()}\n\n"
             f"{profile.warning}\n\n"
             "运行期间可能发送鼠标和键盘输入。是否继续？"
         )
@@ -399,11 +518,13 @@ class MainWindow(QMainWindow):
 
     def on_workflow_event(self, event: object) -> None:
         if isinstance(event, WorkflowEvent):
-            text = event.type.value
+            text = EVENT_LABELS.get(event.type, event.type.value)
             if event.step_name:
                 text += f" · {event.step_name}"
             if event.message:
                 text += f" · {event.message}"
+        elif isinstance(event, dict) and event.get("type") == "cleanup_failed":
+            text = f"控制器清理失败 · {event.get('message', '')}".rstrip(" ·")
         else:
             text = str(event)
         self.append_log(text)

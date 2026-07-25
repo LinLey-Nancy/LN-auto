@@ -18,8 +18,20 @@ STEP_DEFAULTS: dict[str, dict[str, Any]] = {
         "attempts": 3,
         "interval_ms": 500,
         "result_variable": "match",
+        "post_action": "none",
+        "post_button": "left",
+        "post_action_interval_ms": 100,
+        "post_key": "ENTER",
+        "post_modifiers": [],
+        "post_key_hold_ms": 50,
     },
-    "mouse_move": {"x": 0, "y": 0},
+    "mouse_move": {
+        "move_mode": "absolute",
+        "x": 0,
+        "y": 0,
+        "delta_x": 0,
+        "delta_y": 0,
+    },
     "mouse_click": {
         "x": 0,
         "y": 0,
@@ -27,14 +39,23 @@ STEP_DEFAULTS: dict[str, dict[str, Any]] = {
         "count": 1,
         "interval_ms": 100,
     },
-    "key_press": {"key": "ENTER", "modifiers": []},
+    "key_press": {
+        "key": "ENTER",
+        "modifiers": [],
+        "hold_ms": 50,
+    },
     "text_input": {
         "text": "",
         "strategy": "key_sequence",
         "interval_ms": 80,
         "sensitive": False,
     },
-    "wait": {"duration_ms": 500},
+    "wait": {
+        "delay_mode": "fixed",
+        "duration_ms": 500,
+        "min_duration_ms": 300,
+        "max_duration_ms": 800,
+    },
 }
 
 STEP_LABELS = {
@@ -43,7 +64,7 @@ STEP_LABELS = {
     "mouse_click": "鼠标点击",
     "key_press": "键盘按键",
     "text_input": "文本输入",
-    "wait": "等待",
+    "wait": "延迟",
 }
 
 
@@ -128,6 +149,7 @@ class WorkflowDocument:
         return destination
 
     def update_step(self, index: int, field: str, value: Any) -> None:
+        step = self.steps[index]
         if field == "id":
             value = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value)).strip("-")
             if not value:
@@ -137,7 +159,18 @@ class WorkflowDocument:
                 for step_index, step in enumerate(self.steps)
             ):
                 raise ValueError(f"步骤 ID 已存在：{value}")
-        self.steps[index][field] = value
+        if step.get("type") == "wait":
+            if (
+                field == "min_duration_ms"
+                and int(value) > int(step.get("max_duration_ms", value))
+            ):
+                raise ValueError("最短延迟不能大于最长延迟。")
+            if (
+                field == "max_duration_ms"
+                and int(value) < int(step.get("min_duration_ms", value))
+            ):
+                raise ValueError("最长延迟不能小于最短延迟。")
+        step[field] = value
         self.dirty = True
 
     def save(self, path: Path | None = None) -> Path:

@@ -9,7 +9,10 @@
     "foreground_screencap": ["DXGI_DesktopDup_Window", "ScreenDC"],
     "mouse_input": "PostMessage",
     "keyboard_input": "PostMessage",
+    "mouse_lock_follow": false,
+    "direct_screen_input": false,
     "screenshot_target_long_side": 1280,
+    "capture_scope": "window",
     "expected_raw_resolution": [1920, 1080],
     "expected_screenshot_resolution": [1280, 720]
   },

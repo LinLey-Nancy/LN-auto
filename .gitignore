@@ -17,6 +17,8 @@ debug/
 # Locally captured templates and target-specific workflows must not be published.
 assets/resource/image/*
 !assets/resource/image/.gitkeep
+projects/*
+!projects/.gitkeep
 config/workflow.local.json
 config/workflow.local.*.json
 

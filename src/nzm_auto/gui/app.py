@@ -7,15 +7,29 @@ import sys
 from pathlib import Path
 
 from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QLibraryInfo, QTimer, QTranslator
 from PySide6.QtWidgets import QApplication
 
 from nzm_auto.gui.main_window import MainWindow
 from nzm_auto.gui.theme import APP_STYLE
 
 
+def install_chinese_translations(app: QApplication) -> bool:
+    """Load Qt's bundled Simplified Chinese text for standard dialogs/buttons."""
+    translator = QTranslator(app)
+    translations_path = QLibraryInfo.path(
+        QLibraryInfo.LibraryPath.TranslationsPath
+    )
+    if not translator.load("qtbase_zh_CN", translations_path):
+        return False
+    app.installTranslator(translator)
+    app._nzm_qt_translator = translator
+    return True
+
+
 def create_application(argv: list[str] | None = None) -> QApplication:
     app = QApplication(argv if argv is not None else sys.argv)
+    install_chinese_translations(app)
     app.setApplicationName("NZM Auto")
     app.setOrganizationName("NZM Auto")
     app.setStyle("Fusion")

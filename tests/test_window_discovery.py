@@ -27,6 +27,14 @@ class WindowFilterTests(unittest.TestCase):
     def test_title_filter_is_case_insensitive(self) -> None:
         self.assertTrue(matches_filters(self.window, title_filter="example"))
 
+    def test_client_origin_defaults_and_serializes(self) -> None:
+        data = self.window.to_dict()
+
+        self.assertIsNone(self.window.client_x)
+        self.assertIsNone(self.window.client_y)
+        self.assertIn("client_x", data)
+        self.assertIn("client_y", data)
+
     def test_class_filter_rejects_non_match(self) -> None:
         self.assertFalse(matches_filters(self.window, class_filter="browser"))
 

@@ -51,6 +51,8 @@ class WorkflowWorker(QObject):
                 self.workspace,
                 mouse_input=self.input_profile.mouse_method,
                 keyboard_input=self.input_profile.keyboard_method,
+                mouse_lock_follow=self.input_profile.mouse_lock_follow,
+                direct_screen_input=self.input_profile.direct_screen_input,
             )
             result = WorkflowEngine(self.event_received.emit).run(
                 self.definition,
