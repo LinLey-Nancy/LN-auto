@@ -1,7 +1,7 @@
 import unittest
 
-from nzm_auto.windowing.discovery import WindowInfo, matches_filters
-from nzm_auto.windowing.selector import (
+from window_auto.windowing.discovery import WindowInfo, matches_filters
+from window_auto.windowing.selector import (
     AmbiguousWindowError,
     WindowNotFoundError,
     WindowIndexError,
@@ -14,8 +14,8 @@ class WindowFilterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.window = WindowInfo(
             hwnd=123,
-            title="Example Game",
-            class_name="GameWindowClass",
+            title="Example Application",
+            class_name="ApplicationWindowClass",
             window_width=1920,
             window_height=1080,
             client_width=1920,

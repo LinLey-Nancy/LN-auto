@@ -8,11 +8,11 @@ Set fileSystem = CreateObject("Scripting.FileSystemObject")
 scriptDirectory = fileSystem.GetParentFolderName(WScript.ScriptFullName)
 
 quote = Chr(34)
-command = quote & scriptDirectory & "\start.bat" & quote & " --elevated-hidden"
+command = "set WINDOW_AUTO_HIDDEN=1&& call " & quote & scriptDirectory & "\start.bat" & quote
 For Each argument In WScript.Arguments
     command = command & " " & quote & Replace(argument, quote, quote & quote) & quote
 Next
-arguments = "/d /c " & quote & command & quote
+arguments = "/d /s /c " & quote & command & quote
 
 If WScript.Arguments.Count = 1 Then
     If WScript.Arguments(0) = "--validate-only" Then
@@ -25,10 +25,10 @@ On Error Resume Next
 application.ShellExecute shell.ExpandEnvironmentStrings("%ComSpec%"), _
                          arguments, scriptDirectory, "runas", 0
 If Err.Number <> 0 Then
-    message = "Unable to start NZM Auto with administrator privileges." & vbCrLf
-    message = message & "Allow the UAC prompt because the target game runs elevated." & vbCrLf
+    message = "Unable to start Window Auto with administrator privileges." & vbCrLf
+    message = message & "Allow the UAC prompt when the target application requires elevation." & vbCrLf
     message = message & "Error: " & Err.Description
-    Call MsgBox(message, vbCritical, "NZM Auto startup failed")
+    Call MsgBox(message, vbCritical, "Window Auto startup failed")
 End If
 On Error GoTo 0
 WScript.Quit 0

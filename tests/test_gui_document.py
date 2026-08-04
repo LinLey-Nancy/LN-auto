@@ -3,8 +3,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from nzm_auto.gui.document import WorkflowDocument
-from nzm_auto.workflow.loader import load_workflow_v2
+from window_auto.gui.document import WorkflowDocument
+from window_auto.workflow.loader import load_workflow_v2
 
 
 class WorkflowDocumentTests(unittest.TestCase):

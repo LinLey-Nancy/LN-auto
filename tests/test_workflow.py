@@ -6,19 +6,19 @@ from unittest.mock import patch
 
 import numpy
 
-from nzm_auto.automation.template_action import (
+from window_auto.automation.template_action import (
     TemplateActionResult,
     TemplateNotFoundError,
 )
-from nzm_auto.automation.workflow import (
+from window_auto.automation.workflow import (
     WorkflowConfigError,
     WorkflowExecutionError,
     load_workflow,
     run_workflow,
 )
-from nzm_auto.diagnostics.input_test import VisualDifference
-from nzm_auto.diagnostics.template_match import MatchBox
-from nzm_auto.diagnostics.workspace import create_debug_workspace
+from window_auto.diagnostics.input_test import VisualDifference
+from window_auto.diagnostics.template_match import MatchBox
+from window_auto.diagnostics.workspace import create_debug_workspace
 
 
 def _write_workflow(root: Path, step_updates: dict | None = None) -> Path:
@@ -107,11 +107,11 @@ class WorkflowTests(unittest.TestCase):
 
             with (
                 patch(
-                    "nzm_auto.automation.workflow.load_template_image",
+                    "window_auto.automation.workflow.load_template_image",
                     return_value=numpy.zeros((5, 5, 3), dtype=numpy.uint8),
                 ),
                 patch(
-                    "nzm_auto.automation.workflow.run_template_action",
+                    "window_auto.automation.workflow.run_template_action",
                     side_effect=[TemplateNotFoundError("not found"), expected],
                 ) as action,
             ):
@@ -129,11 +129,11 @@ class WorkflowTests(unittest.TestCase):
 
             with (
                 patch(
-                    "nzm_auto.automation.workflow.load_template_image",
+                    "window_auto.automation.workflow.load_template_image",
                     return_value=numpy.zeros((5, 5, 3), dtype=numpy.uint8),
                 ),
                 patch(
-                    "nzm_auto.automation.workflow.run_template_action",
+                    "window_auto.automation.workflow.run_template_action",
                     return_value=expected,
                 ) as action,
             ):

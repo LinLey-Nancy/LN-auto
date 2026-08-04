@@ -2,11 +2,11 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
-from nzm_auto.application.input_profiles import InputProfileName, get_input_profile
-from nzm_auto.application.session import AutomationSession
-from nzm_auto.application.window_service import WindowQuery, choose_window, list_windows
-from nzm_auto.diagnostics.workspace import DebugWorkspace
-from nzm_auto.windowing.discovery import WindowInfo
+from window_auto.application.input_profiles import InputProfileName, get_input_profile
+from window_auto.application.session import AutomationSession
+from window_auto.application.window_service import WindowQuery, choose_window, list_windows
+from window_auto.diagnostics.workspace import DebugWorkspace
+from window_auto.windowing.discovery import WindowInfo
 
 
 def _window(hwnd: int, *, visible: bool = True) -> WindowInfo:
@@ -34,7 +34,7 @@ def _config() -> dict:
 
 
 class WindowServiceTests(unittest.TestCase):
-    @patch("nzm_auto.application.window_service.find_windows")
+    @patch("window_auto.application.window_service.find_windows")
     def test_list_windows_applies_query_and_visibility(self, find_windows: Mock) -> None:
         unnamed = _window(3)
         unnamed = WindowInfo(
@@ -57,7 +57,7 @@ class WindowServiceTests(unittest.TestCase):
             class_filter="class",
         )
 
-    @patch("nzm_auto.application.window_service.find_windows")
+    @patch("window_auto.application.window_service.find_windows")
     def test_choose_window_selects_query_result_by_index(self, find_windows: Mock) -> None:
         find_windows.return_value = [_window(10), _window(20)]
 
@@ -79,8 +79,8 @@ class InputProfileTests(unittest.TestCase):
 
         self.assertIn("忽略模拟输入", profile.warning)
 
-    def test_game_window_profile_targets_background_locked_mouse_window(self) -> None:
-        profile = get_input_profile(InputProfileName.GAME_WINDOW_MESSAGE)
+    def test_background_window_profile_targets_locked_mouse_window(self) -> None:
+        profile = get_input_profile(InputProfileName.BACKGROUND_WINDOW_MESSAGE)
 
         self.assertEqual(profile.mouse_method, "PostMessage")
         self.assertEqual(profile.keyboard_method, "PostMessage")
@@ -88,8 +88,8 @@ class InputProfileTests(unittest.TestCase):
         self.assertTrue(profile.mouse_lock_follow)
         self.assertFalse(profile.direct_screen_input)
 
-    def test_game_precise_profile_uses_direct_screen_coordinates(self) -> None:
-        profile = get_input_profile(InputProfileName.GAME_FOREGROUND_PRECISE)
+    def test_precise_foreground_profile_uses_direct_screen_coordinates(self) -> None:
+        profile = get_input_profile(InputProfileName.FOREGROUND_PRECISE)
 
         self.assertEqual(profile.mouse_method, "PostMessage")
         self.assertEqual(profile.keyboard_method, "Seize")
@@ -98,8 +98,8 @@ class InputProfileTests(unittest.TestCase):
 
 
 class AutomationSessionTests(unittest.TestCase):
-    @patch("nzm_auto.application.session.connect_controller")
-    @patch("nzm_auto.application.session.create_controller")
+    @patch("window_auto.application.session.connect_controller")
+    @patch("window_auto.application.session.create_controller")
     def test_connect_can_override_mouse_input(
         self,
         create_controller: Mock,
@@ -135,7 +135,7 @@ class AutomationSessionTests(unittest.TestCase):
         self.assertEqual(session.controller_raw_size, (1920, 1080))
         self.assertEqual(session.controller_image_size, (1280, 720))
 
-    @patch("nzm_auto.application.session.load_task_runtime")
+    @patch("window_auto.application.session.load_task_runtime")
     def test_runtime_is_initialized_once(self, load_task_runtime: Mock) -> None:
         runtime = Mock()
         load_task_runtime.return_value = runtime
@@ -158,7 +158,7 @@ class AutomationSessionTests(unittest.TestCase):
             workspace.logs / "maa",
         )
 
-    @patch("nzm_auto.application.session.deactivate_controller")
+    @patch("window_auto.application.session.deactivate_controller")
     def test_close_is_idempotent(self, deactivate_controller: Mock) -> None:
         session = AutomationSession(
             controller=Mock(),

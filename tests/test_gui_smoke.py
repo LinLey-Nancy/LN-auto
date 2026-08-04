@@ -8,9 +8,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QMessageBox, QPushButton
 
-from nzm_auto.gui.app import create_application
-from nzm_auto.gui.document import WorkflowDocument
-from nzm_auto.gui.main_window import MainWindow
+from window_auto.gui.app import create_application
+from window_auto.gui.document import WorkflowDocument
+from window_auto.gui.main_window import MainWindow
 
 
 class GuiSmokeTests(unittest.TestCase):
@@ -57,17 +57,17 @@ class GuiSmokeTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             startup_log = Path(directory) / "startup.log"
             startup_log.write_text(
-                "[NZM Auto] Starting...\n",
+                "[Window Auto] Starting...\n",
                 encoding="utf-8",
             )
             with patch(
-                "nzm_auto.gui.main_window.STARTUP_LOG_PATH",
+                "window_auto.gui.main_window.STARTUP_LOG_PATH",
                 startup_log,
             ):
                 window = MainWindow()
 
             self.assertIn(
-                "启动 · [NZM Auto] Starting...",
+                "启动 · [Window Auto] Starting...",
                 window.log_view.toPlainText(),
             )
             window.close()
@@ -83,7 +83,7 @@ class GuiSmokeTests(unittest.TestCase):
             window.target_label.setText("旧目标窗口")
 
             with patch(
-                "nzm_auto.gui.main_window.QFileDialog.getOpenFileName",
+                "window_auto.gui.main_window.QFileDialog.getOpenFileName",
                 return_value=(str(path), "工作流 JSON (*.json)"),
             ):
                 window.open_document()

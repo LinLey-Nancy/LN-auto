@@ -3,13 +3,13 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nzm-auto"
+name = "Window-auto"
 version = "0.1.0"
 description = "Windows automation framework built on MaaFramework."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
-authors = [{ name = "NZM-auto contributors" }]
+authors = [{ name = "Window-auto contributors" }]
 dependencies = [
     "MaaFw==5.12.1",
     "Pillow==12.3.0",
@@ -21,8 +21,8 @@ gui = [
 ]
 
 [project.scripts]
-nzm-auto = "nzm_auto.cli:main"
-nzm-auto-gui = "nzm_auto.gui.app:main"
+window-auto = "window_auto.cli:main"
+window-auto-gui = "window_auto.gui.app:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nzm_auto"]
+packages = ["src/window_auto"]

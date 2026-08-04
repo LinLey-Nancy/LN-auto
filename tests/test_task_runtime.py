@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from nzm_auto.runtime.task_runtime import TaskRuntimeError, run_task
+from window_auto.runtime.task_runtime import TaskRuntimeError, run_task
 
 
 class _CompletedJob:
@@ -56,7 +56,7 @@ class FrameworkPipelineTests(unittest.TestCase):
 
         with (
             patch(
-                "nzm_auto.runtime.task_runtime.time.monotonic",
+                "window_auto.runtime.task_runtime.time.monotonic",
                 side_effect=[0.0, 2.0, 2.0],
             ),
             self.assertRaisesRegex(TaskRuntimeError, "timed out after 1 seconds"),

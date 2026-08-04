@@ -10,7 +10,7 @@ from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
-from nzm_auto.gui.template_creator import (
+from window_auto.gui.template_creator import (
     TemplateCreationDialog,
     map_selection_to_source,
     safe_template_stem,

@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 
-from nzm_auto.config.loader import load_config
+from window_auto.config.loader import load_config
 
 
 class DefaultConfigTests(unittest.TestCase):

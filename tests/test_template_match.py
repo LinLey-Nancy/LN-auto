@@ -3,7 +3,7 @@ import unittest
 
 import numpy
 
-from nzm_auto.diagnostics.template_match import (
+from window_auto.diagnostics.template_match import (
     TemplateMatchDiagnosticError,
     best_template_candidate,
     crop_template,

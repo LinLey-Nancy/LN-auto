@@ -2,7 +2,7 @@
   "version": 2,
   "name": "example-gui-workflow",
   "target": {
-    "title_pattern": "逆战：未来",
+    "title_pattern": "示例应用",
     "class_name": null
   },
   "settings": {
@@ -42,7 +42,7 @@
       "id": "type-marker",
       "type": "text_input",
       "name": "输入测试文本",
-      "text": "NZM automation input verification",
+      "text": "Window automation input verification",
       "strategy": "key_sequence",
       "interval_ms": 80
     },

@@ -4,7 +4,7 @@ from unittest.mock import patch
 import numpy
 from PIL import Image
 
-from nzm_auto.diagnostics.desktop_scope import (
+from window_auto.diagnostics.desktop_scope import (
     DesktopCoordinateError,
     DesktopRecognitionFrame,
     capture_desktop_recognition_frame,
@@ -12,7 +12,7 @@ from nzm_auto.diagnostics.desktop_scope import (
     desktop_point_to_controller,
     scale_box_between_sizes,
 )
-from nzm_auto.diagnostics.template_match import MatchBox
+from window_auto.diagnostics.template_match import MatchBox
 
 
 def _frame() -> DesktopRecognitionFrame:
@@ -36,7 +36,7 @@ class DesktopScopeTests(unittest.TestCase):
 
     def test_desktop_capture_scales_to_long_side(self) -> None:
         with patch(
-            "nzm_auto.diagnostics.desktop_scope.ImageGrab.grab",
+            "window_auto.diagnostics.desktop_scope.ImageGrab.grab",
             return_value=Image.new("RGB", (1920, 1080), (1, 2, 3)),
         ):
             frame = capture_desktop_recognition_frame(1280)

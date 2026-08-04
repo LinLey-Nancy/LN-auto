@@ -1,10 +1,5 @@
 @echo off
-if /i "%~1"=="--elevated-hidden" (
-    shift
-    set "NZM_AUTO_HIDDEN=1"
-    goto hidden_start
-)
-if defined NZM_AUTO_HIDDEN goto hidden_start
+if defined WINDOW_AUTO_HIDDEN goto hidden_start
 start "" wscript.exe "%~dp0start.vbs" %*
 exit /b 0
 
@@ -12,20 +7,20 @@ exit /b 0
 setlocal
 cd /d "%~dp0"
 
-if not defined NZM_AUTO_HIDDEN goto main
-if defined NZM_AUTO_LOGGING goto main
-set "NZM_AUTO_LOGGING=1"
+if not defined WINDOW_AUTO_HIDDEN goto main
+if defined WINDOW_AUTO_LOGGING goto main
+set "WINDOW_AUTO_LOGGING=1"
 if not exist "debug" mkdir "debug"
 call "%~f0" %* > "debug\startup.log" 2>&1
 exit /b %errorlevel%
 
 :main
 set "VENV_PY=.venv\Scripts\python.exe"
-set "GUI_EXE=.venv\Scripts\nzm-auto-gui.exe"
+set "GUI_EXE=.venv\Scripts\window-auto-gui.exe"
 
 if exist "%VENV_PY%" goto check_environment
 
-echo [NZM Auto] Creating the Python 3.12 environment...
+echo [Window Auto] Creating the Python 3.12 environment...
 py -3.12 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>&1
 if not errorlevel 1 (
     py -3.12 -m venv ".venv"
@@ -40,42 +35,42 @@ python -m venv ".venv"
 if not exist "%VENV_PY%" goto venv_failed
 
 :check_environment
-"%VENV_PY%" -c "import sys; assert sys.version_info[:2] == (3, 12); import maa; import PySide6; import nzm_auto.gui.app" >nul 2>&1
+"%VENV_PY%" -c "import sys; assert sys.version_info[:2] == (3, 12); import maa; import PySide6; import window_auto.gui.app" >nul 2>&1
 if not errorlevel 1 goto launch
 
-echo [NZM Auto] Installing required dependencies...
+echo [Window Auto] Installing required dependencies...
 "%VENV_PY%" -m pip install --disable-pip-version-check -e ".[gui]"
 if errorlevel 1 goto install_failed
 
 :launch
 if not exist "%GUI_EXE%" goto install_failed
-echo [NZM Auto] Starting...
+echo [Window Auto] Starting...
 "%GUI_EXE%" %*
 if errorlevel 1 goto run_failed
 exit /b 0
 
 :python_missing
 echo.
-echo [NZM Auto] Python 3.12 was not found.
+echo [Window Auto] Python 3.12 was not found.
 echo Install 64-bit Python 3.12, then run this file again.
 goto failed
 
 :venv_failed
 echo.
-echo [NZM Auto] Failed to create the .venv environment.
+echo [Window Auto] Failed to create the .venv environment.
 goto failed
 
 :install_failed
 echo.
-echo [NZM Auto] Failed to install the project dependencies.
+echo [Window Auto] Failed to install the project dependencies.
 goto failed
 
 :run_failed
 echo.
-echo [NZM Auto] The application exited with an error.
+echo [Window Auto] The application exited with an error.
 
 :failed
 echo.
-if defined NZM_AUTO_HIDDEN exit /b 1
+if defined WINDOW_AUTO_HIDDEN exit /b 1
 pause
 exit /b 1

@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from nzm_auto.diagnostics.workspace import create_debug_workspace
+from window_auto.diagnostics.workspace import create_debug_workspace
 
 
 class DebugWorkspaceTests(unittest.TestCase):

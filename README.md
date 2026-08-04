@@ -1,4 +1,4 @@
-# NZM-auto
+# Window-auto
 
 一个基于 MaaFramework 的 Windows 自动化通用框架。
 
@@ -12,14 +12,14 @@
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\python.exe -m nzm_auto self-test
+.\.venv\Scripts\python.exe -m window_auto self-test
 ```
 
 需要桌面工作流编辑器时安装 GUI 可选依赖：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[gui]"
-nzm-auto-gui
+window-auto-gui
 ```
 
 桌面端当前支持新建、打开和保存 v2 工作流，添加及排序动作步骤，编辑步骤参数，只读选择目标窗口，选择 Win32 输入兼容策略，并在后台线程中运行或安全停止工作流。模板识别步骤可以选择已有模板，也可以按照引导从完整截图框选并创建本地模板；失败策略可设为“再次运行”，持续识别直到成功或用户停止；识别成功后可直接单击、双击或发送按键。延迟步骤支持固定时间和随机范围，键盘步骤支持配置按下持续时间，鼠标移动支持绝对坐标和相对距离。属性名称提供悬浮说明。运行前会再次显示目标窗口和输入策略确认，不会把 Maa Job 成功直接解释为目标应用已处理输入。
@@ -27,31 +27,31 @@ nzm-auto-gui
 v2 工作流也可以从命令行运行：
 
 ```powershell
-nzm-auto workflow-run-v2 `
+window-auto workflow-run-v2 `
   --workflow config/workflow.v2.example.json `
-  --input-profile game-foreground-precise
+  --input-profile foreground-precise
 ```
 
-对于无边框 FPS/TPS 游戏窗口，优先使用 `game-foreground-precise`：模板命中点会先从识别分辨率换算到原始客户区，再通过 `ClientToScreen` 得到实际屏幕像素；程序会恢复并置顶选中的目标窗口、校验最终鼠标位置，然后发送一次按下/抬起，避免 Maa `Seize` 在多显示器或无边框窗口中二次缩放坐标。该策略会短暂占用物理鼠标。`game-window-message` 只适合已实测接受后台消息的游戏；`foreground-compatible` 保留为 Maa 原生前台输入。目标游戏以管理员权限运行时，自动化 GUI 也必须以管理员权限运行，否则 Windows 会以错误码 5 拒绝截图和输入消息。双击 `start.bat` 会通过隐藏启动器请求管理员权限，接受 UAC 后仍不会显示黑色 CMD 窗口。
+对于需要精确前台坐标的窗口，优先使用 `foreground-precise`：模板命中点会先从识别分辨率换算到原始客户区，再通过 `ClientToScreen` 得到实际屏幕像素；程序会恢复并置顶选中的目标窗口、校验最终鼠标位置，然后发送一次按下/抬起，避免 Maa `Seize` 在多显示器或特殊窗口布局中重复换算坐标。该策略会短暂占用物理鼠标。`background-window-message` 只适合已实测接受后台消息的目标程序；`foreground-compatible` 保留为 Maa 原生前台输入。目标程序以管理员权限运行时，自动化 GUI 也必须以管理员权限运行，否则 Windows 会以错误码 5 拒绝截图和输入消息。双击 `start.bat` 会通过隐藏启动器请求管理员权限，接受 UAC 后仍不会显示黑色 CMD 窗口。
 
 也可在安装项目后使用：
 
 ```powershell
-nzm-auto self-test
+window-auto self-test
 ```
 
 只检查 MaaFramework 运行库版本：
 
 ```powershell
-nzm-auto maa-version
+window-auto maa-version
 ```
 
 只读列出桌面窗口：
 
 ```powershell
-nzm-auto windows list
-nzm-auto windows list --title "窗口标题的一部分"
-nzm-auto windows list --class-name "窗口类名的一部分" --json
+window-auto windows list
+window-auto windows list --title "窗口标题的一部分"
+window-auto windows list --class-name "窗口类名的一部分" --json
 ```
 
 窗口枚举不会创建 Maa 控制器、截图或发送输入。
@@ -59,8 +59,8 @@ nzm-auto windows list --class-name "窗口类名的一部分" --json
 根据 `config/default.json` 唯一选择目标窗口：
 
 ```powershell
-nzm-auto windows select
-nzm-auto windows select --json
+window-auto windows select
+window-auto windows select --json
 ```
 
 当前 `title_pattern` 按不区分大小写的标题子串匹配。匹配数量不是恰好一个时，选择会安全失败。
@@ -68,9 +68,9 @@ nzm-auto windows select --json
 通用交互选择（推荐）：
 
 ```powershell
-nzm-auto windows choose
-nzm-auto windows choose --visible-only
-nzm-auto windows choose --title "标题的一部分"
+window-auto windows choose
+window-auto windows choose --visible-only
+window-auto windows choose --title "标题的一部分"
 ```
 
 程序会列出候选窗口并要求输入编号。`--index 0` 可用于非交互测试。当前步骤只返回本次选择，不保存配置。
@@ -78,14 +78,14 @@ nzm-auto windows choose --title "标题的一部分"
 运行最小控制器连接闭环：
 
 ```powershell
-nzm-auto run
-nzm-auto run --visible-only
-nzm-auto run --title "标题的一部分"
+window-auto run
+window-auto run --visible-only
+window-auto run --title "标题的一部分"
 ```
 
 该命令会选择窗口、连接 Maa Win32Controller、按 `controller.capture_scope` 校验截图链路、加载资源包并执行 `FrameworkSelfTest`，然后安全释放。默认 `capture_scope: "window"` 仍会按 `expected_raw_resolution` / `expected_screenshot_resolution` 做严格检查；把这两个字段设为 `null` 可只检查截图长边，或把 `capture_scope` 设为 `"desktop"` 以整张桌面作为识别范围。任一分辨率不符合要求时会在发送输入前安全失败。自检 Pipeline 使用 `DirectHit + DoNothing`，不会发送输入。任务执行时间超过 `runtime.task_timeout_seconds` 时，程序会请求 Maa 停止任务并安全失败。
 
-桌面为 1920×1080 时可使用 `"capture_scope": "desktop"`、`"expected_raw_resolution": null`、`"expected_screenshot_resolution": null`：识别范围是整张桌面，识别图仍按长边缩放到 `1280×720`；命中点会先换算到所选窗口 client，再交给 Maa 点击，命中点落在窗口外时不会发送输入。桌面范围模板要按桌面识别图制作；受保护、独占全屏或反作弊目标仍可能需要窗口范围截图、管理员权限或驱动级输入。
+桌面为 1920×1080 时可使用 `"capture_scope": "desktop"`、`"expected_raw_resolution": null`、`"expected_screenshot_resolution": null`：识别范围是整张桌面，识别图仍按长边缩放到 `1280×720`；命中点会先换算到所选窗口 client，再交给 Maa 点击，命中点落在窗口外时不会发送输入。桌面范围模板要按桌面识别图制作；受权限或截图机制限制的目标仍可能需要窗口范围截图或管理员权限。
 
 ## 调试文件
 
@@ -101,8 +101,8 @@ debug/
 截取一次所选窗口并保存到 `debug/screenshots/`：
 
 ```powershell
-nzm-auto capture
-nzm-auto capture --title "标题的一部分" --index 0
+window-auto capture
+window-auto capture --title "标题的一部分" --index 0
 ```
 
 每次 `run` 或 `capture` 都会在 `debug/logs/` 生成独立日志。
@@ -110,7 +110,7 @@ nzm-auto capture --title "标题的一部分" --index 0
 裁剪临时模板并执行 Maa TemplateMatch：
 
 ```powershell
-nzm-auto template-match --title "逆战" --index 0 --template-roi 20 10 200 35
+window-auto template-match --title "示例应用" --index 0 --template-roi 20 10 200 35
 ```
 
 临时模板只保留在内存中，不写入 `debug/`。匹配标注图和 JSON 报告分别写入 `debug/screenshots/` 和 `debug/reports/`；正式模板统一放在 `assets/resource/image/`。
@@ -118,7 +118,7 @@ nzm-auto template-match --title "逆战" --index 0 --template-roi 20 10 200 35
 执行一次明确坐标的双击并对比前后截图：
 
 ```powershell
-nzm-auto input-test --title "逆战" --index 0 --point 280 205
+window-auto input-test --title "示例应用" --index 0 --point 280 205
 ```
 
 默认需要输入 `YES` 才会发送双击，并明确提示目标可能被打开；自动化测试可显式传入 `--yes`。该诊断命令临时使用 MaaFramework 的 `Seize` 前台鼠标输入，以产生 Windows 能够识别的原生双击，因此执行时会短暂激活目标窗口并占用物理鼠标。两次点击间隔 100ms，前后截图、差异图和 JSON 报告均写入 `debug/`。
@@ -126,13 +126,13 @@ nzm-auto input-test --title "逆战" --index 0 --point 280 205
 根据模板识别结果自动计算中心坐标并执行操作：
 
 ```powershell
-nzm-auto template-action --title "逆战" --index 0 --template assets/resource/image/start.png --action click
+window-auto template-action --title "示例应用" --index 0 --template assets/resource/image/start.png --action click
 ```
 
 正式模板统一存放在 `assets/resource/image/`。该目录中的本地模板已被 `.gitignore` 排除，不会提交到 GitHub；仓库只保留 `.gitkeep`。在尚未制作正式模板时，也可以从当前画面裁剪一块仅驻留内存的临时模板来验证完整流程：
 
 ```powershell
-nzm-auto template-action --title "逆战" --index 0 --template-roi 200 190 150 32 --action double-click
+window-auto template-action --title "示例应用" --index 0 --template-roi 200 190 150 32 --action double-click
 ```
 
 执行器仅在 MaaFramework 模板匹配成功后发送输入，并使用匹配框中心而不是固定坐标。默认需要输入 `YES` 确认；可显式传入 `--yes`。目标标注图、操作前后截图、差异图和 JSON 报告均写入 `debug/`。
@@ -144,10 +144,10 @@ nzm-auto template-action --title "逆战" --index 0 --template-roi 200 190 150 3
 把 `config/workflow.example.json` 复制为被 Git 忽略的 `config/workflow.local.json`，将每一步的 `template` 指向 `assets/resource/image/` 下的本地模板，然后执行：
 
 ```powershell
-nzm-auto workflow-run --title "逆战" --index 0 --workflow config/workflow.local.json
+window-auto workflow-run --title "示例应用" --index 0 --workflow config/workflow.local.json
 ```
 
-当前工作流是普通的顺序步骤列表，不是游戏状态机。每一步支持以下配置：
+当前工作流是普通的顺序步骤列表，不是条件状态机。每一步支持以下配置：
 
 - `template`：相对项目根目录或绝对路径的 PNG 模板。
 - `threshold`：MaaFramework 模板匹配阈值。

@@ -7,20 +7,20 @@ from unittest.mock import Mock, patch
 import numpy
 from PIL import Image
 
-from nzm_auto.diagnostics.desktop_scope import DesktopRecognitionFrame
-from nzm_auto.diagnostics.template_match import MatchBox, TemplateRecognitionResult
-from nzm_auto.windowing.discovery import WindowInfo
-from nzm_auto.workflow.actions import (
+from window_auto.diagnostics.desktop_scope import DesktopRecognitionFrame
+from window_auto.diagnostics.template_match import MatchBox, TemplateRecognitionResult
+from window_auto.windowing.discovery import WindowInfo
+from window_auto.workflow.actions import (
     ActionResult,
     TemplateNotFoundError,
     WorkflowActionError,
     execute_action,
 )
-from nzm_auto.workflow.context import CancellationToken, ExecutionContext
-from nzm_auto.workflow.engine import WorkflowEngine, WorkflowExecutionError
-from nzm_auto.workflow.events import WorkflowEventType
-from nzm_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
-from nzm_auto.workflow.model import (
+from window_auto.workflow.context import CancellationToken, ExecutionContext
+from window_auto.workflow.engine import WorkflowEngine, WorkflowExecutionError
+from window_auto.workflow.events import WorkflowEventType
+from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
+from window_auto.workflow.model import (
     KeyPressStep,
     MouseClickStep,
     MouseMoveStep,
@@ -30,7 +30,7 @@ from nzm_auto.workflow.model import (
     WorkflowDefinition,
     WorkflowSettings,
 )
-from nzm_auto.workflow.virtual_keys import resolve_text_character, resolve_virtual_key
+from window_auto.workflow.virtual_keys import resolve_text_character, resolve_virtual_key
 
 
 class _Job:
@@ -98,7 +98,7 @@ class WorkflowV2LoaderTests(unittest.TestCase):
             data = {
                 "version": 2,
                 "name": "GUI workflow",
-                "target": {"title_pattern": "逆战：未来", "class_name": "CabinetWClass"},
+                "target": {"title_pattern": "示例应用", "class_name": "ExampleWindowClass"},
                 "settings": {"stop_on_error": True, "default_timeout_ms": 5000},
                 "steps": [
                     {
@@ -119,7 +119,7 @@ class WorkflowV2LoaderTests(unittest.TestCase):
                         "id": "type",
                         "type": "text_input",
                         "name": "Type text",
-                        "text": "NZM automation test",
+                        "text": "Window automation test",
                     },
                 ],
             }
@@ -129,7 +129,7 @@ class WorkflowV2LoaderTests(unittest.TestCase):
             definition = load_workflow_v2(path, root)
 
             self.assertEqual(definition.name, "GUI workflow")
-            self.assertEqual(definition.target.title_pattern, "逆战：未来")
+            self.assertEqual(definition.target.title_pattern, "示例应用")
             self.assertEqual(len(definition.steps), 3)
             self.assertEqual(definition.steps[0].template_path, template.resolve())
             self.assertEqual(definition.steps[1].match_variable, "document")
@@ -360,12 +360,12 @@ class WorkflowV2ActionTests(unittest.TestCase):
             ],
         )
 
-    def test_precise_game_click_bypasses_controller_coordinate_mapping(self) -> None:
+    def test_precise_foreground_click_bypasses_controller_coordinate_mapping(self) -> None:
         session, context = _context()
         session.config = {"controller": {"direct_screen_input": True}}
         session.window = WindowInfo(
             hwnd=123,
-            title="Game",
+            title="Application",
             class_name="UnrealWindow",
             window_width=1920,
             window_height=1080,
@@ -375,7 +375,7 @@ class WorkflowV2ActionTests(unittest.TestCase):
             minimized=False,
         )
 
-        with patch("nzm_auto.workflow.actions.click_client_point") as direct_click:
+        with patch("window_auto.workflow.actions.click_client_point") as direct_click:
             execute_action(
                 MouseClickStep(
                     id="precise-click",
@@ -390,12 +390,12 @@ class WorkflowV2ActionTests(unittest.TestCase):
         direct_click.assert_called_once_with(session.window, (1711, 949), "left")
         self.assertEqual(session.controller.calls, [])
 
-    def test_precise_game_click_bypasses_controller_coordinate_mapping(self) -> None:
+    def test_precise_foreground_click_bypasses_controller_coordinate_mapping(self) -> None:
         session, context = _context()
         session.config = {"controller": {"direct_screen_input": True}}
         session.window = WindowInfo(
             hwnd=123,
-            title="Game",
+            title="Application",
             class_name="UnrealWindow",
             window_width=1920,
             window_height=1080,
@@ -405,7 +405,7 @@ class WorkflowV2ActionTests(unittest.TestCase):
             minimized=False,
         )
 
-        with patch("nzm_auto.workflow.actions.click_client_point") as direct_click:
+        with patch("window_auto.workflow.actions.click_client_point") as direct_click:
             execute_action(
                 MouseClickStep(
                     id="precise-click",
@@ -462,7 +462,7 @@ class WorkflowV2ActionTests(unittest.TestCase):
         session = _Session()
         cancellation = Mock()
         context = ExecutionContext(session=session, cancellation=cancellation)
-        with patch("nzm_auto.workflow.actions.randint", return_value=275) as random_value:
+        with patch("window_auto.workflow.actions.randint", return_value=275) as random_value:
             result = execute_action(
                 WaitStep(
                     id="delay",
@@ -486,13 +486,13 @@ class WorkflowV2ActionTests(unittest.TestCase):
             box=MatchBox(10, 20, 30, 40),
         )
         with (
-            patch("nzm_auto.workflow.actions.load_template_image"),
+            patch("window_auto.workflow.actions.load_template_image"),
             patch(
-                "nzm_auto.workflow.actions.capture_image",
+                "window_auto.workflow.actions.capture_image",
                 return_value=numpy.zeros((720, 1280, 3), dtype=numpy.uint8),
             ),
             patch(
-                "nzm_auto.workflow.actions.recognize_template",
+                "window_auto.workflow.actions.recognize_template",
                 return_value=recognition,
             ),
         ):
@@ -543,13 +543,13 @@ class WorkflowV2ActionTests(unittest.TestCase):
             box=MatchBox(10, 20, 30, 40),
         )
         with (
-            patch("nzm_auto.workflow.actions.load_template_image"),
+            patch("window_auto.workflow.actions.load_template_image"),
             patch(
-                "nzm_auto.workflow.actions.capture_image",
+                "window_auto.workflow.actions.capture_image",
                 return_value=numpy.zeros((720, 1280, 3), dtype=numpy.uint8),
             ),
             patch(
-                "nzm_auto.workflow.actions.recognize_template",
+                "window_auto.workflow.actions.recognize_template",
                 return_value=recognition,
             ),
         ):
@@ -608,13 +608,13 @@ class WorkflowV2ActionTests(unittest.TestCase):
             box=MatchBox(195, 115, 10, 10),
         )
         with (
-            patch("nzm_auto.workflow.actions.load_template_image"),
+            patch("window_auto.workflow.actions.load_template_image"),
             patch(
-                "nzm_auto.workflow.actions.capture_desktop_recognition_frame",
+                "window_auto.workflow.actions.capture_desktop_recognition_frame",
                 return_value=frame,
             ),
             patch(
-                "nzm_auto.workflow.actions.recognize_template",
+                "window_auto.workflow.actions.recognize_template",
                 return_value=recognition,
             ),
         ):
@@ -640,13 +640,13 @@ class WorkflowV2ActionTests(unittest.TestCase):
             box=MatchBox(0, 0, 10, 10),
         )
         with (
-            patch("nzm_auto.workflow.actions.load_template_image"),
+            patch("window_auto.workflow.actions.load_template_image"),
             patch(
-                "nzm_auto.workflow.actions.capture_image",
+                "window_auto.workflow.actions.capture_image",
                 return_value=numpy.zeros((720, 1280, 3), dtype=numpy.uint8),
             ),
             patch(
-                "nzm_auto.workflow.actions.recognize_template",
+                "window_auto.workflow.actions.recognize_template",
                 return_value=recognition,
             ),
         ):
@@ -685,10 +685,10 @@ class WorkflowV2ActionTests(unittest.TestCase):
             candidate_box=MatchBox(799, 125, 226, 64),
         )
         with (
-            patch("nzm_auto.workflow.actions.load_template_image"),
-            patch("nzm_auto.workflow.actions.capture_image"),
+            patch("window_auto.workflow.actions.load_template_image"),
+            patch("window_auto.workflow.actions.capture_image"),
             patch(
-                "nzm_auto.workflow.actions.recognize_template",
+                "window_auto.workflow.actions.recognize_template",
                 return_value=recognition,
             ),
             self.assertRaises(TemplateNotFoundError) as raised,
@@ -778,7 +778,7 @@ class WorkflowV2EngineTests(unittest.TestCase):
             ),
         )
         with patch(
-            "nzm_auto.workflow.engine.execute_action",
+            "window_auto.workflow.engine.execute_action",
             side_effect=(
                 TemplateNotFoundError("not found"),
                 TemplateNotFoundError("not found"),

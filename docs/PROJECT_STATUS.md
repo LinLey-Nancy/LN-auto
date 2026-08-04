@@ -1,10 +1,10 @@
-# NZM-auto 项目状态与路线图
+# Window-auto 项目状态与路线图
 
-更新时间：2026-07-25
+更新时间：2026-08-04
 
 ## 项目目标
 
-NZM-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终目标是让用户通过桌面 GUI 创建和运行自定义工作流，包括：
+Window-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终目标是让用户通过桌面 GUI 创建和运行自定义工作流，包括：
 
 - 模板识别与结果复用
 - 鼠标移动、单击、双击和不同鼠标按键
@@ -19,8 +19,8 @@ NZM-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终
 - 修复 `start.vbs` 被 Windows Script Host 按 ANSI 误解析后，在中文提示行出现“未结束的字符串常量”的启动错误。
 - `start.vbs` 现在使用纯 ASCII 启动错误文本，并提供不会启动 GUI 的语法验证模式。
 - 启动链路通过隐藏 `cmd.exe` 请求管理员权限；启动失败信息继续写入 `debug/startup.log` 并显示在 GUI 运行日志。
-- 修复 1280×720 模板识别坐标直接用于 1920×1080 游戏输入造成的点击偏移。
-- 新增 `game-foreground-precise` 游戏精确点击策略，并完成“逆战：未来”真实窗口测试。
+- 修复 1280×720 模板识别坐标直接用于 1920×1080 目标窗口输入造成的点击偏移。
+- 新增 `foreground-precise` 前台精确点击策略，并完成实际目标窗口测试。
 - 窗口选择列表不再显示空标题窗口。
 - 增加模板选择、模板创建引导、识别失败循环重试、识别后操作、随机延迟、按键持续时间和相对鼠标移动。
 - 修复工作流属性编辑过程中同步销毁 Qt 控件导致的偶发原生崩溃。
@@ -29,7 +29,7 @@ NZM-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终
 ## 当前架构
 
 ```text
-src/nzm_auto/
+src/window_auto/
 ├── application/   CLI 与 GUI 共用的应用服务
 ├── automation/    第一版模板动作与顺序工作流
 ├── config/        主配置加载与校验
@@ -75,7 +75,7 @@ src/nzm_auto/
 
 ### M3：PySide6 桌面 GUI
 
-- 新增 `nzm-auto-gui` 启动入口和可选依赖 `.[gui]`。
+- 新增 `window-auto-gui` 启动入口和可选依赖 `.[gui]`。
 - 已实现：
   - 新建、打开、保存和另存工作流
   - 动作组件列表
@@ -99,22 +99,22 @@ src/nzm_auto/
 
 ## 输入兼容性实测
 
-本轮同时使用普通 Windows 测试窗口和真实的“逆战：未来”无边框游戏窗口验证。
+本轮同时使用普通 Windows 测试窗口和实际目标窗口验证。
 
 | 输入路径 | 实测结果 | 使用建议 |
 |---|---|---|
-| 非管理员 `PostMessage` | Windows 返回错误码 5（拒绝访问） | 自动化程序权限不得低于目标游戏 |
-| 管理员 `PostMessage` | 消息派发成功，但游戏没有处理“开始”点击 | 不得仅凭 Job 成功判定 |
-| Maa `Seize` 鼠标 | 多显示器/无边框环境出现二次坐标映射，并可能改变窗口状态 | 不作为该游戏默认方案 |
-| `game-foreground-precise` | 模板中心换算为客户区 `(1711, 949)` 后成功点击，游戏进入过场 | 当前游戏鼠标默认方案 |
+| 非管理员 `PostMessage` | Windows 返回错误码 5（拒绝访问） | 自动化程序权限不得低于目标程序 |
+| 管理员 `PostMessage` | 消息派发成功，但目标程序没有处理点击 | 不得仅凭 Job 成功判定 |
+| Maa `Seize` 鼠标 | 多显示器或特殊窗口布局下出现二次坐标映射，并可能改变窗口状态 | 不作为坐标敏感场景的默认方案 |
+| `foreground-precise` | 模板中心换算为客户区坐标后成功点击目标控件 | 适合需要精确前台坐标的场景 |
 | `Seize + post_input_text` | 字符失真且保存时序不可靠 | 仅保留为可选兼容模式 |
-| `Seize + click_key` 离散按键 | 单键和 `Ctrl+S` 等组合键成功 | 适合游戏按键操作 |
+| `Seize + click_key` 离散按键 | 单键和 `Ctrl+S` 等组合键成功 | 适合离散按键操作 |
 | `Seize + key_down/key_up` 逐键文本 | 完整 33 字符与磁盘内容逐字符一致 | ASCII 文本的当前可靠方案 |
 
 当前输入策略：
 
-- `game-foreground-precise`：把识别点换算为客户区原始坐标，再经 `ClientToScreen` 定位真实屏幕像素；恢复并置顶目标窗口、校验最终鼠标位置后点击，无边框 FPS/TPS 游戏默认推荐。
-- `game-window-message`：使用 `PostMessage` 并开启鼠标锁定跟随，仅适合已实测接受后台消息的游戏。
+- `foreground-precise`：把识别点换算为客户区原始坐标，再经 `ClientToScreen` 定位真实屏幕像素；恢复并置顶目标窗口、校验最终鼠标位置后点击，适合坐标敏感的前台窗口。
+- `background-window-message`：使用 `PostMessage` 并开启鼠标锁定跟随，仅适合已实测接受后台消息的目标程序。
 - `foreground-compatible`：鼠标和键盘使用 `Seize`，仅适合目标窗口已经位于前台的场景。
 - `background-message`：使用 `PostMessage`，只适合目标应用实测确认支持的场景。
 - `driver-interception`：预留 Interception 驱动级输入，需要用户显式安装驱动和管理员权限。
@@ -126,10 +126,10 @@ src/nzm_auto/
 - Python：3.12
 - MaaFramework：5.12.1
 - PySide6：6.11.1
-- 单元及 GUI 无头测试：102 项通过
+- 单元及 GUI 无头测试：103 项通过
 - `python -m compileall`：通过
-- `nzm-auto self-test`：通过
-- `nzm-auto-gui --smoke-test`：通过
+- `window-auto self-test`：通过
+- `window-auto-gui --smoke-test`：通过
 - Windows 真实 GUI 启动与可见窗口枚举：通过
 
 ## 当前限制
@@ -179,11 +179,11 @@ src/nzm_auto/
 
 验收标准：
 
-- 执行器可表达“识别状态 → 选择分支 → 重试 → 结束”的常见游戏流程。
+- 执行器可表达“识别状态 → 选择分支 → 重试 → 结束”的常见自动化流程。
 - 任意循环都有次数或时间上限。
 - 停止请求不会导致重复输入。
 
-### M6：验证、诊断与游戏兼容性
+### M6：验证、诊断与目标程序兼容性
 
 目标：让每次输入都能选择适合的验证方式，并形成可审计报告。
 

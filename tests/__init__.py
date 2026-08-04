@@ -1,1 +1,1 @@
-"""Automated checks for NZM-auto."""
+"""Automated checks for Window-auto."""

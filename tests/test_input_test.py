@@ -5,7 +5,7 @@ import tempfile
 
 import numpy
 
-from nzm_auto.diagnostics.input_test import calculate_visual_difference, run_input_test
+from window_auto.diagnostics.input_test import calculate_visual_difference, run_input_test
 
 
 class _SuccessfulJob:
@@ -49,7 +49,7 @@ class InputTestDiagnosticsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with patch(
-                "nzm_auto.diagnostics.input_test.capture_image",
+                "window_auto.diagnostics.input_test.capture_image",
                 side_effect=[before, after],
             ):
                 result = run_input_test(

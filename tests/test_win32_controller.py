@@ -2,7 +2,7 @@ import unittest
 
 import numpy
 
-from nzm_auto.runtime.win32_controller import (
+from window_auto.runtime.win32_controller import (
     ControllerConnectionError,
     combine_screencap_methods,
     connect_controller,

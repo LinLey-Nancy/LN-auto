@@ -2,7 +2,7 @@ import unittest
 
 import numpy
 
-from nzm_auto.diagnostics.screenshot import bgr_to_image
+from window_auto.diagnostics.screenshot import bgr_to_image
 
 
 class ScreenshotTests(unittest.TestCase):

@@ -6,14 +6,14 @@ from unittest.mock import patch
 import numpy
 from PIL import Image
 
-from nzm_auto.automation.template_action import (
+from window_auto.automation.template_action import (
     TemplateActionError,
     action_click_count,
     box_center,
     load_template_image,
     run_template_action,
 )
-from nzm_auto.diagnostics.template_match import MatchBox, TemplateRecognitionResult
+from window_auto.diagnostics.template_match import MatchBox, TemplateRecognitionResult
 
 
 class _SuccessfulJob:
@@ -61,11 +61,11 @@ class TemplateActionTests(unittest.TestCase):
             root = Path(directory)
             with (
                 patch(
-                    "nzm_auto.automation.template_action.capture_image",
+                    "window_auto.automation.template_action.capture_image",
                     side_effect=[before, after],
                 ),
                 patch(
-                    "nzm_auto.automation.template_action.recognize_template",
+                    "window_auto.automation.template_action.recognize_template",
                     return_value=recognition,
                 ),
             ):
@@ -97,11 +97,11 @@ class TemplateActionTests(unittest.TestCase):
             root = Path(directory)
             with (
                 patch(
-                    "nzm_auto.automation.template_action.capture_image",
+                    "window_auto.automation.template_action.capture_image",
                     return_value=screenshot,
                 ),
                 patch(
-                    "nzm_auto.automation.template_action.recognize_template",
+                    "window_auto.automation.template_action.recognize_template",
                     return_value=recognition,
                 ),
             ):
