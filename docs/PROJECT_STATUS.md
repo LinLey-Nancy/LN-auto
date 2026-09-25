@@ -1,10 +1,10 @@
-# Window-auto 项目状态与路线图
+# LN-auto 项目状态与路线图
 
-更新时间：2026-08-04
+更新时间：2026-09-25
 
 ## 项目目标
 
-Window-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终目标是让用户通过桌面 GUI 创建和运行自定义工作流，包括：
+LN-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终目标是让用户通过桌面 GUI 创建和运行自定义工作流，包括：
 
 - 模板识别与结果复用
 - 鼠标移动、单击、双击和不同鼠标按键
@@ -13,6 +13,38 @@ Window-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最
 - 工作流保存、加载、调试与发布
 
 项目以“输入发送成功不等于目标应用已经处理输入”为安全原则。正式流程应通过模板、截图变化或其他可观测状态验证操作结果。
+
+## 2026-09-25 更新内容
+
+全面 bug 审查与修复（两轮共 22 项，均已回归验证）。
+
+第二轮（模拟真实用户操作路径）：
+
+- 修复步骤默认超时与长轮询配置冲突：`template_match` 等步骤的实际超时 = `default_timeout_ms` + 步骤自身配置的等待预算（识别次数×间隔、按键持续、字符间隔等），合法的长轮询不再被误杀；引擎侧另有 7 天上限防止看门狗溢出。
+- 修复步骤名含「已停止」时运行失败不弹错误提示框：取消判定改为读取 worker 的取消令牌，不再对消息文本做子串匹配。
+- 修复 `task_timeout_seconds` 接受 NaN/Infinity 导致任务永不超时。
+- 修复所有 CLI 命令的配置加载错误裸奔 traceback：现在输出干净错误并返回退出码 1。
+- 修复 `windows choose --json` 交互模式下 stdout 被候选表格污染：表格改走 stderr。
+- 修复冻结 windowed 构建下 `sys.stdin` 为 None 导致的崩溃：交互输入不可用时给出干净报错。
+- 修复按键/组合键框粘贴 `²` 等特殊 Unicode 数字时未捕获的 ValueError；虚拟键码整数范围（1–255）现在在保存校验时拦截。
+- 修复保存目标文件被占用时残留临时 JSON 文件。
+- 修复模板目录不可写时保存模板静默无提示：现在弹出明确错误。
+- 修复窗口选择对话框筛选输入与可见性勾选不生效：现在输入即过滤、勾选即刷新。
+- 修复 v1 工作流超大毫秒字段导致 `time.sleep` 溢出：所有时间字段统一上限 1 天。
+- 修复窗口枚举可能混入空句柄（hwnd=0）条目。
+
+第一轮：
+
+- 修复 GUI 保存不做校验、能写出无法再打开的工作流文件：`WorkflowDocument.save()` 在传入 `project_root` 时先经严格 v2 loader 校验，失败则不写盘；同时把点击次数、识别次数、识别阈值的编辑器范围收紧到与校验器一致。
+- 修复 v1 链路（`template-action`、`input-test`、`workflow-run`）把缩放截图坐标直接当作控制器原始坐标点击的偏移问题：现在统一按控制器原始分辨率换算，报告同时记录识别坐标与输入坐标。
+- 修复 `workflow-run-v2` 在步骤失败（`stop_on_error: false` 或“继续下一步”）时误报成功并返回退出码 0；GUI 运行结束提示同步区分部分失败。
+- 配置加载新增 `screencap_mode`、`background_screencap`、`foreground_screencap`、`mouse_input`、`keyboard_input` 校验，拼写错误或缺键在启动时即报清晰错误。
+- 修复 GUI「另存为」动作不可达：新增文件菜单，四个文件动作及快捷键全部可用。
+- 修复按键/组合键输入数字虚拟键码（如 65）运行时失败：编辑器现在把纯数字键码解析为整数。
+- 修复 `attempts=0` 时模板识别步骤抛 `UnboundLocalError` 而非业务异常。
+- `default_timeout_ms` 现在真正生效：非延迟步骤超时会在安全边界失败，延迟步骤按显式时长豁免。
+- 修复重复配置文件日志导致 handler 累积、日志重复写入。
+- 删除测试文件中被遮蔽的重名测试方法。
 
 ## 2026-07-25 更新内容
 
@@ -75,7 +107,7 @@ src/window_auto/
 
 ### M3：PySide6 桌面 GUI
 
-- 新增 `window-auto-gui` 启动入口和可选依赖 `.[gui]`。
+- 新增 `ln-auto-gui` 启动入口和可选依赖 `.[gui]`。
 - 已实现：
   - 新建、打开、保存和另存工作流
   - 动作组件列表
@@ -126,10 +158,10 @@ src/window_auto/
 - Python：3.12
 - MaaFramework：5.12.1
 - PySide6：6.11.1
-- 单元及 GUI 无头测试：103 项通过
+- 单元及 GUI 无头测试：134 项通过
 - `python -m compileall`：通过
-- `window-auto self-test`：通过
-- `window-auto-gui --smoke-test`：通过
+- `ln-auto self-test`：通过
+- `ln-auto-gui --smoke-test`：通过
 - Windows 真实 GUI 启动与可见窗口枚举：通过
 
 ## 当前限制

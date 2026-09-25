@@ -50,6 +50,7 @@ def _action_result(root: Path, visual_change: bool = True) -> TemplateActionResu
     return TemplateActionResult(
         action="double-click",
         point=(20, 30),
+        input_point=(20, 30),
         click_count=2,
         score=0.95,
         box=MatchBox(10, 20, 20, 20),

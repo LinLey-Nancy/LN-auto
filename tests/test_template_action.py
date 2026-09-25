@@ -24,8 +24,9 @@ class _SuccessfulJob:
 
 
 class _FakeController:
-    def __init__(self) -> None:
+    def __init__(self, resolution: tuple[int, int] = (40, 30)) -> None:
         self.clicks: list[tuple[int, int]] = []
+        self.resolution = resolution
 
     def post_click(self, x: int, y: int) -> _SuccessfulJob:
         self.clicks.append((x, y))
@@ -86,7 +87,46 @@ class TemplateActionTests(unittest.TestCase):
 
         self.assertEqual(controller.clicks, [(20, 12), (20, 12)])
         self.assertEqual(result.point, (20, 12))
+        self.assertEqual(result.input_point, (20, 12))
         self.assertTrue(result.difference.visual_change_detected)
+
+    def test_recognized_center_is_scaled_to_raw_controller_coordinates(self) -> None:
+        before = numpy.zeros((30, 40, 3), dtype=numpy.uint8)
+        after = before.copy()
+        after[5:20, 10:30] = 100
+        controller = _FakeController(resolution=(80, 60))
+        recognition = TemplateRecognitionResult(True, 0.95, MatchBox(10, 5, 20, 15))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch(
+                    "window_auto.automation.template_action.capture_image",
+                    side_effect=[before, after],
+                ),
+                patch(
+                    "window_auto.automation.template_action.recognize_template",
+                    return_value=recognition,
+                ),
+            ):
+                result = run_template_action(
+                    object(),
+                    controller,
+                    numpy.zeros((5, 5, 3), dtype=numpy.uint8),
+                    0.8,
+                    "click",
+                    root / "before.png",
+                    root / "after.png",
+                    root / "target.png",
+                    root / "difference.png",
+                    root / "report.json",
+                    click_interval_seconds=0,
+                    settle_seconds=0,
+                )
+
+        self.assertEqual(result.point, (20, 12))
+        self.assertEqual(result.input_point, (40, 24))
+        self.assertEqual(controller.clicks, [(40, 24)])
 
     def test_missing_template_sends_no_input(self) -> None:
         controller = _FakeController()

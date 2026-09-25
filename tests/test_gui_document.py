@@ -2,9 +2,10 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from window_auto.gui.document import WorkflowDocument
-from window_auto.workflow.loader import load_workflow_v2
+from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
 
 
 class WorkflowDocumentTests(unittest.TestCase):
@@ -71,6 +72,60 @@ class WorkflowDocumentTests(unittest.TestCase):
             document.update_step(index, "min_duration_ms", 900)
         with self.assertRaisesRegex(ValueError, "最长延迟"):
             document.update_step(index, "max_duration_ms", 200)
+
+    def test_save_with_project_root_rejects_unopenable_documents(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "workflow.json"
+            document = WorkflowDocument()  # zero steps: loader requires a non-empty list
+            document.set_name("未保存的草稿")
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "steps"):
+                document.save(path, root)
+
+            self.assertFalse(path.exists())
+            self.assertTrue(document.dirty)
+
+    def test_save_with_project_root_rejects_missing_template(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "workflow.json"
+            document = WorkflowDocument()
+            document.add_step("template_match")  # default template file does not exist
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "template"):
+                document.save(path, root)
+
+            self.assertFalse(path.exists())
+
+    def test_save_with_project_root_keeps_valid_document_openable(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "workflow.json"
+            document = WorkflowDocument()
+            document.add_step("wait")
+
+            saved = document.save(path, root)
+            loaded = WorkflowDocument.load(saved, root)
+
+            self.assertEqual(loaded.steps[0]["type"], "wait")
+            self.assertFalse(loaded.dirty)
+
+    def test_failed_save_leaves_no_temp_files_behind(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "locked.json"
+            document = WorkflowDocument()
+            document.add_step("wait")
+
+            with patch(
+                "window_auto.gui.document.os.replace",
+                side_effect=PermissionError("locked"),
+            ):
+                with self.assertRaises(PermissionError):
+                    document.save(path, root)
+
+            self.assertEqual(list(root.iterdir()), [])
 
 
 if __name__ == "__main__":

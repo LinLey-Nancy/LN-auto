@@ -3,13 +3,13 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "Window-auto"
+name = "LN-auto"
 version = "0.1.0"
 description = "Windows automation framework built on MaaFramework."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
-authors = [{ name = "Window-auto contributors" }]
+authors = [{ name = "LN-auto contributors" }]
 dependencies = [
     "MaaFw==5.12.1",
     "Pillow==12.3.0",
@@ -19,10 +19,13 @@ dependencies = [
 gui = [
     "PySide6>=6.8,<7",
 ]
+packaging = [
+    "pyinstaller>=6.10",
+]
 
 [project.scripts]
-window-auto = "window_auto.cli:main"
-window-auto-gui = "window_auto.gui.app:main"
+ln-auto = "window_auto.cli:main"
+ln-auto-gui = "window_auto.gui.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/window_auto"]

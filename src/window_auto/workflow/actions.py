@@ -155,6 +155,10 @@ def _run_template_match(
     step: TemplateMatchStep,
     context: ExecutionContext,
 ) -> ActionResult:
+    if step.attempts < 1:
+        raise WorkflowActionError(
+            f"Template match attempts must be at least 1, got {step.attempts}."
+        )
     runtime = context.session.initialize_runtime()
     template = load_template_image(step.template_path)
     for attempt in range(1, step.attempts + 1):

@@ -42,11 +42,19 @@ def create_debug_workspace(project_root: Path, debug_dir: str) -> DebugWorkspace
     return workspace
 
 
+_FILE_HANDLER_MARK = "_window_auto_file_handler"
+
+
 def configure_file_logging(workspace: DebugWorkspace) -> Path:
     log_path = workspace.timestamped_path(workspace.logs, "run", ".log")
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
+    for existing in list(root_logger.handlers):
+        if getattr(existing, _FILE_HANDLER_MARK, False):
+            root_logger.removeHandler(existing)
+            existing.close()
     handler = logging.FileHandler(log_path, encoding="utf-8")
+    setattr(handler, _FILE_HANDLER_MARK, True)
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     )

@@ -10,6 +10,7 @@ import time
 
 from maa.controller import Win32Controller
 
+from window_auto.config.loader import MAX_TIME_MS
 from window_auto.automation.template_action import (
     TemplateActionResult,
     TemplateNotFoundError,
@@ -90,8 +91,10 @@ def _required_string(data: dict, field: str, context: str) -> str:
 
 def _milliseconds(data: dict, field: str, default: int, context: str) -> float:
     value = data.get(field, default)
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise WorkflowConfigError(f"{context}.{field} must be a non-negative integer.")
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_TIME_MS:
+        raise WorkflowConfigError(
+            f"{context}.{field} must be an integer from 0 to {MAX_TIME_MS}."
+        )
     return value / 1000.0
 
 

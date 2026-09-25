@@ -21,6 +21,22 @@ class DesktopRecognitionFrame:
     recognition_size: tuple[int, int]
 
 
+def scale_point_between_sizes(
+    point: tuple[int, int],
+    source_size: tuple[int, int],
+    target_size: tuple[int, int],
+) -> tuple[int, int]:
+    """Map a point between coordinate spaces, e.g. scaled screenshot to raw input."""
+    source_width, source_height = source_size
+    target_width, target_height = target_size
+    if min(source_width, source_height, target_width, target_height) <= 0:
+        raise DesktopCoordinateError("Coordinate-space sizes must be positive.")
+    return (
+        round(point[0] * target_width / source_width),
+        round(point[1] * target_height / source_height),
+    )
+
+
 def scale_box_between_sizes(
     box: MatchBox,
     source_size: tuple[int, int],

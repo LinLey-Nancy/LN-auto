@@ -33,8 +33,10 @@ class WindowSelectorDialog(QDialog):
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("按窗口标题筛选")
         self.filter_edit.setAccessibleName("窗口标题筛选")
+        self.filter_edit.textChanged.connect(lambda _text: self.refresh())
         self.visible_only = QCheckBox("仅显示可见窗口")
         self.visible_only.setChecked(True)
+        self.visible_only.toggled.connect(lambda _checked: self.refresh())
         refresh = QPushButton("刷新")
         refresh.clicked.connect(self.refresh)
 

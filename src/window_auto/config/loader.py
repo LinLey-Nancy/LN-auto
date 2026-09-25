@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 
 REQUIRED_TOP_LEVEL_KEYS = {"window", "controller", "runtime", "diagnostics"}
+
+# Upper bound for any configured time value: one day in milliseconds. This
+# keeps time.sleep()/threading.Timer() far away from platform overflow limits.
+MAX_TIME_MS = 86_400_000
 
 
 def _optional_positive_resolution(config: dict[str, Any], key: str) -> list[int] | None:
@@ -55,6 +60,21 @@ def load_config(path: Path) -> dict[str, Any]:
         or screenshot_target_long_side <= 0
     ):
         raise ValueError("controller.screenshot_target_long_side must be a positive integer.")
+    screencap_mode = config["controller"].get("screencap_mode")
+    if screencap_mode not in {"background", "foreground"}:
+        raise ValueError("controller.screencap_mode must be 'background' or 'foreground'.")
+    for key in ("background_screencap", "foreground_screencap"):
+        methods = config["controller"].get(key)
+        if (
+            not isinstance(methods, list)
+            or not methods
+            or any(not isinstance(method, str) or not method for method in methods)
+        ):
+            raise ValueError(f"controller.{key} must be a non-empty array of strings.")
+    for key in ("mouse_input", "keyboard_input"):
+        value = config["controller"].get(key)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"controller.{key} must be a non-empty string.")
     capture_scope = config["controller"].get("capture_scope", "window")
     if capture_scope not in {"window", "desktop"}:
         raise ValueError("controller.capture_scope must be 'window' or 'desktop'.")
@@ -83,8 +103,9 @@ def load_config(path: Path) -> dict[str, Any]:
     if (
         isinstance(task_timeout_seconds, bool)
         or not isinstance(task_timeout_seconds, (int, float))
+        or not math.isfinite(task_timeout_seconds)
         or task_timeout_seconds <= 0
     ):
-        raise ValueError("runtime.task_timeout_seconds must be a positive number.")
+        raise ValueError("runtime.task_timeout_seconds must be a positive finite number.")
 
     return config

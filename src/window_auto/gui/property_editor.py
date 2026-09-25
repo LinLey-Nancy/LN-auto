@@ -250,6 +250,10 @@ class PropertyEditor(QWidget):
             widget = QSpinBox()
             if key in {"delta_x", "delta_y"}:
                 widget.setRange(-1_000_000, 1_000_000)
+            elif key == "count":
+                widget.setRange(1, 2)
+            elif key == "attempts":
+                widget.setRange(1, 100)
             else:
                 widget.setRange(0, 1_000_000)
             widget.setValue(value)
@@ -258,7 +262,7 @@ class PropertyEditor(QWidget):
             )
         elif isinstance(value, float):
             widget = QDoubleSpinBox()
-            widget.setRange(0.0, 1.0)
+            widget.setRange(0.001 if key == "threshold" else 0.0, 1.0)
             widget.setDecimals(3)
             widget.setSingleStep(0.05)
             widget.setValue(value)
@@ -272,7 +276,7 @@ class PropertyEditor(QWidget):
             widget.editingFinished.connect(
                 lambda control=widget, field=key, original=value: self._emit(
                     field,
-                    self._parse_text(control.text(), original),
+                    self._parse_text(control.text(), original, field),
                 )
             )
         widget.setAccessibleName(label)
@@ -293,7 +297,7 @@ class PropertyEditor(QWidget):
         editor.editingFinished.connect(
             lambda control=editor, original=value: self._emit(
                 "template",
-                self._parse_text(control.text(), original),
+                self._parse_text(control.text(), original, "template"),
             )
         )
         select_button = QPushButton("选择文件")
@@ -323,12 +327,28 @@ class PropertyEditor(QWidget):
             return ""
         return str(value)
 
+    _KEY_FIELDS = {"key", "post_key"}
+    _MODIFIER_FIELDS = {"modifiers", "post_modifiers"}
+
     @staticmethod
-    def _parse_text(text: str, original: Any) -> Any:
+    def _parse_key_code(text: str) -> str | int:
+        """Parse a virtual-key entry; never raises on exotic Unicode digits."""
+        try:
+            return int(text)
+        except ValueError:
+            return text
+
+    @staticmethod
+    def _parse_text(text: str, original: Any, field: str = "") -> Any:
         if isinstance(original, list):
-            return [item.strip() for item in text.split(",") if item.strip()]
+            items = [item.strip() for item in text.split(",") if item.strip()]
+            if field in PropertyEditor._MODIFIER_FIELDS:
+                return [PropertyEditor._parse_key_code(item) for item in items]
+            return items
         if original is None:
             return text.strip() or None
+        if field in PropertyEditor._KEY_FIELDS:
+            return PropertyEditor._parse_key_code(text.strip())
         return text
 
     def _emit(self, field: str, value: object) -> None:

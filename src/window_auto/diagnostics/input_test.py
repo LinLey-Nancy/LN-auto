@@ -12,6 +12,10 @@ from PIL import Image
 
 from maa.controller import Win32Controller
 
+from window_auto.diagnostics.desktop_scope import (
+    DesktopCoordinateError,
+    scale_point_between_sizes,
+)
 from window_auto.diagnostics.screenshot import bgr_to_image, capture_image
 
 
@@ -29,6 +33,7 @@ class VisualDifference:
 @dataclass(frozen=True, slots=True)
 class InputTestResult:
     point: tuple[int, int]
+    input_point: tuple[int, int]
     click_count: int
     difference: VisualDifference
     before_path: Path
@@ -74,13 +79,29 @@ def run_input_test(
     if x < 0 or y < 0 or x >= width or y >= height:
         raise InputTestError(f"Click point {point!r} exceeds screenshot size {width}x{height}.")
 
+    # post_click expects raw client coordinates, but ``point`` is given in
+    # scaled screenshot coordinates; convert between the two spaces.
+    try:
+        raw_width, raw_height = (int(value) for value in controller.resolution)
+    except (TypeError, ValueError) as error:
+        raise InputTestError(
+            f"Controller reported an invalid raw resolution: {error}"
+        ) from error
+    try:
+        input_point = scale_point_between_sizes(
+            point, (width, height), (raw_width, raw_height)
+        )
+    except DesktopCoordinateError as error:
+        raise InputTestError(str(error)) from error
+
     if click_count <= 0:
         raise InputTestError("Click count must be positive.")
     for click_index in range(click_count):
-        click_job = controller.post_click(x, y).wait()
+        click_job = controller.post_click(*input_point).wait()
         if not click_job.succeeded:
             raise InputTestError(
-                f"MaaFramework click {click_index + 1}/{click_count} failed at {point!r}."
+                f"MaaFramework click {click_index + 1}/{click_count} failed at "
+                f"{input_point!r} (screenshot point {point!r})."
             )
         if click_index + 1 < click_count:
             time.sleep(click_interval_seconds)
@@ -96,6 +117,7 @@ def run_input_test(
 
     report = {
         "point": list(point),
+        "input_point": list(input_point),
         "click_count": click_count,
         "difference": asdict(difference),
         "before_path": str(before_path.resolve()),
@@ -105,6 +127,7 @@ def run_input_test(
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return InputTestResult(
         point=point,
+        input_point=input_point,
         click_count=click_count,
         difference=difference,
         before_path=before_path.resolve(),

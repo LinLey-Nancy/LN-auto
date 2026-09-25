@@ -95,6 +95,29 @@ class TemplateCreatorTests(unittest.TestCase):
                 self.assertEqual(image.size, (20, 10))
             dialog.close()
 
+    def test_unwritable_template_directory_shows_an_error(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "screen.png"
+            blocker = root / "templates"
+            blocker.write_text("a file occupies the directory path")
+            Image.new("RGB", (100, 80)).save(source)
+            dialog = TemplateCreationDialog(source, blocker)
+            dialog.selector._selection = QRect(5, 5, 20, 20)
+
+            from unittest.mock import patch
+            from PySide6.QtWidgets import QMessageBox
+
+            errors = []
+            with patch.object(
+                QMessageBox, "critical", lambda *a, **k: errors.append(a)
+            ):
+                dialog._save_template()
+
+            self.assertEqual(len(errors), 1)
+            self.assertIsNone(dialog.saved_path)
+            dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

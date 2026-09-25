@@ -26,5 +26,6 @@ config/workflow.local.*.json
 .claude/
 .idea/
 .vscode/
+.codegraph/
 .DS_Store
 Thumbs.db

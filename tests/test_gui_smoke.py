@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QMessageBox, QPus
 from window_auto.gui.app import create_application
 from window_auto.gui.document import WorkflowDocument
 from window_auto.gui.main_window import MainWindow
+from window_auto.gui.property_editor import PropertyEditor
 
 
 class GuiSmokeTests(unittest.TestCase):
@@ -187,6 +188,83 @@ class GuiSmokeTests(unittest.TestCase):
 
         window.document.dirty = False
         window.close()
+
+    def test_save_as_action_is_reachable_from_the_menu_bar(self) -> None:
+        window = MainWindow()
+
+        menu_actions = [
+            action
+            for menu in window.menuBar().actions()
+            for action in menu.menu().actions()
+        ]
+
+        self.assertIn(window.save_as_action, menu_actions)
+        window.document.dirty = False
+        window.close()
+
+    def test_numeric_virtual_key_codes_parse_to_integers(self) -> None:
+        self.assertEqual(PropertyEditor._parse_text("65", "ENTER", "key"), 65)
+        self.assertEqual(PropertyEditor._parse_text("ENTER", "ENTER", "key"), "ENTER")
+        self.assertEqual(
+            PropertyEditor._parse_text("CTRL, 16", [], "modifiers"),
+            ["CTRL", 16],
+        )
+        self.assertEqual(
+            PropertyEditor._parse_text("65", "ENTER", "post_key"),
+            65,
+        )
+
+    def test_exotic_unicode_digit_does_not_crash_key_parsing(self) -> None:
+        self.assertEqual(PropertyEditor._parse_text("²", "ENTER", "key"), "²")
+        self.assertEqual(
+            PropertyEditor._parse_text("CTRL, ²", [], "modifiers"),
+            ["CTRL", "²"],
+        )
+
+    def test_failure_popup_is_not_swallowed_by_step_name_text(self) -> None:
+        window = MainWindow()
+        window._worker = None  # no worker: nothing was cancelled
+        calls = []
+        with patch.object(QMessageBox, "critical", lambda *a, **k: calls.append(a)):
+            window.on_workflow_finished(False, "Step '已停止检查' failed: boom")
+        self.assertEqual(len(calls), 1)
+
+        worker = type(
+            "Worker",
+            (),
+            {"cancellation": type("Token", (), {"cancelled": True})()},
+        )()
+        window._worker = worker
+        with patch.object(QMessageBox, "critical", lambda *a, **k: calls.append(a)):
+            window.on_workflow_finished(False, "工作流已停止。")
+        self.assertEqual(len(calls), 1)  # still exactly one: the real failure above
+        window._worker = None
+        window.document.dirty = False
+        window.close()
+
+    def test_window_filter_edits_refresh_immediately(self) -> None:
+        from window_auto.gui.window_dialog import WindowSelectorDialog
+        from window_auto.windowing.discovery import WindowInfo
+
+        fake = WindowInfo(
+            hwnd=0x1001, title="记事本", class_name="Notepad",
+            window_width=800, window_height=600,
+            client_width=800, client_height=600,
+            visible=True, minimized=False,
+        )
+        with patch(
+            "window_auto.gui.window_dialog.list_windows", return_value=[fake]
+        ) as mocked_list:
+            dialog = WindowSelectorDialog()
+            calls_after_init = mocked_list.call_count
+            dialog.filter_edit.setText("记")
+            calls_after_typing = mocked_list.call_count
+            dialog.visible_only.setChecked(False)
+            calls_after_toggle = mocked_list.call_count
+            dialog.reject()
+
+        self.assertGreater(calls_after_typing, calls_after_init)
+        self.assertGreater(calls_after_toggle, calls_after_typing)
 
 
 if __name__ == "__main__":

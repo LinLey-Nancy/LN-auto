@@ -40,18 +40,38 @@ def parse_input_method(method_name: str) -> int:
 
 
 def create_controller(window: WindowInfo, controller_config: dict[str, Any]) -> Win32Controller:
-    screencap_methods = (
-        controller_config["background_screencap"]
-        if controller_config["screencap_mode"] == "background"
-        else controller_config["foreground_screencap"]
-    )
-    controller = Win32Controller(
-        window.hwnd,
-        combine_screencap_methods(screencap_methods),
-        parse_input_method(controller_config["mouse_input"]),
-        parse_input_method(controller_config["keyboard_input"]),
-    )
-    target_long_side = controller_config["screenshot_target_long_side"]
+    try:
+        screencap_mode = controller_config["screencap_mode"]
+        screencap_methods = (
+            controller_config["background_screencap"]
+            if screencap_mode == "background"
+            else controller_config["foreground_screencap"]
+        )
+        mouse_input = controller_config["mouse_input"]
+        keyboard_input = controller_config["keyboard_input"]
+        target_long_side = controller_config["screenshot_target_long_side"]
+    except KeyError as error:
+        raise ControllerConnectionError(
+            f"Controller configuration is missing the key: {error}"
+        ) from error
+    if screencap_mode not in {"background", "foreground"}:
+        raise ControllerConnectionError(
+            f"controller.screencap_mode must be 'background' or 'foreground', "
+            f"got {screencap_mode!r}."
+        )
+    try:
+        controller = Win32Controller(
+            window.hwnd,
+            combine_screencap_methods(screencap_methods),
+            parse_input_method(mouse_input),
+            parse_input_method(keyboard_input),
+        )
+    except ControllerConnectionError:
+        raise
+    except RuntimeError as error:
+        raise ControllerConnectionError(
+            f"Failed to create the Win32 controller: {error}"
+        ) from error
     if not controller.set_screenshot_target_long_side(target_long_side):
         raise ControllerConnectionError(
             f"Failed to set Maa screenshot target long side to {target_long_side}."

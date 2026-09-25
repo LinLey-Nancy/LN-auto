@@ -59,8 +59,16 @@ class WorkflowWorker(QObject):
                 session,
                 self.cancellation,
             )
+            failed_steps = [step for step in result.steps if not step.succeeded]
             if result.cancelled:
                 self.finished.emit(False, "工作流已停止。")
+            elif failed_steps:
+                failed_names = "、".join(step.step_id for step in failed_steps)
+                self.finished.emit(
+                    False,
+                    f"工作流“{result.workflow_name}”有 {len(failed_steps)} 个步骤失败："
+                    f"{failed_names}。",
+                )
             else:
                 self.finished.emit(True, f"工作流“{result.workflow_name}”执行完成。")
         except Exception as error:

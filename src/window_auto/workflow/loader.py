@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from window_auto.config.loader import MAX_TIME_MS
 from window_auto.workflow.model import (
     KeyPressStep,
     MouseClickStep,
@@ -102,6 +103,10 @@ def _key_value(
         raise WorkflowV2ConfigError(
             f"{context}.{field} must be a key name or virtual key code."
         )
+    if isinstance(value, int) and not 1 <= value <= 0xFF:
+        raise WorkflowV2ConfigError(
+            f"{context}.{field} virtual key code must be from 1 to 255."
+        )
     return value
 
 
@@ -117,6 +122,10 @@ def _modifiers(
     ):
         raise WorkflowV2ConfigError(
             f"{context}.{field} must be an array of key names/codes."
+        )
+    if any(isinstance(value, int) and not 1 <= value <= 0xFF for value in values):
+        raise WorkflowV2ConfigError(
+            f"{context}.{field} virtual key codes must be from 1 to 255."
         )
     return tuple(values)
 
@@ -158,13 +167,16 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
             raise WorkflowV2ConfigError(
                 f"{context}.delay_mode must be 'fixed' or 'random'."
             )
-        duration_ms = _integer(data, "duration_ms", context, default=0, minimum=0)
+        duration_ms = _integer(
+            data, "duration_ms", context, default=0, minimum=0, maximum=MAX_TIME_MS
+        )
         min_duration_ms = _integer(
             data,
             "min_duration_ms",
             context,
             default=duration_ms,
             minimum=0,
+            maximum=MAX_TIME_MS,
         )
         max_duration_ms = _integer(
             data,
@@ -172,6 +184,7 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
             context,
             default=duration_ms,
             minimum=0,
+            maximum=MAX_TIME_MS,
         )
         if min_duration_ms > max_duration_ms:
             raise WorkflowV2ConfigError(
@@ -239,14 +252,18 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
             match_variable=match_variable,
             button=button,
             count=_integer(data, "count", context, default=1, minimum=1, maximum=2),
-            interval_ms=_integer(data, "interval_ms", context, default=100, minimum=0),
+            interval_ms=_integer(
+                data, "interval_ms", context, default=100, minimum=0, maximum=MAX_TIME_MS
+            ),
         )
     if step_type == "key_press":
         return KeyPressStep(
             **base,
             key=_key_value(data, "key", context),
             modifiers=_modifiers(data, "modifiers", context),
-            hold_ms=_integer(data, "hold_ms", context, default=50, minimum=0),
+            hold_ms=_integer(
+                data, "hold_ms", context, default=50, minimum=0, maximum=MAX_TIME_MS
+            ),
         )
     if step_type == "text_input":
         text = data.get("text")
@@ -270,6 +287,7 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
                 context,
                 default=80,
                 minimum=0,
+                maximum=MAX_TIME_MS,
             ),
             sensitive=sensitive,
         )
@@ -301,7 +319,9 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
         template_path=template,
         threshold=threshold,
         attempts=_integer(data, "attempts", context, default=1, minimum=1, maximum=100),
-        interval_ms=_integer(data, "interval_ms", context, default=500, minimum=0),
+        interval_ms=_integer(
+            data, "interval_ms", context, default=500, minimum=0, maximum=MAX_TIME_MS
+        ),
         result_variable=_string(data, "result_variable", context),
         post_action=post_action,
         post_button=post_button,
@@ -311,6 +331,7 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
             context,
             default=100,
             minimum=0,
+            maximum=MAX_TIME_MS,
         ),
         post_key=_key_value(data, "post_key", context, default="ENTER"),
         post_modifiers=_modifiers(data, "post_modifiers", context),
@@ -320,6 +341,7 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
             context,
             default=50,
             minimum=0,
+            maximum=MAX_TIME_MS,
         ),
     )
 
@@ -376,6 +398,7 @@ def load_workflow_v2(path: Path, project_root: Path) -> WorkflowDefinition:
                 "workflow.settings",
                 default=10_000,
                 minimum=1,
+                maximum=MAX_TIME_MS,
             ),
         )
 

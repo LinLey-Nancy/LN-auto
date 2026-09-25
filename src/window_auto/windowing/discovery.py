@@ -94,6 +94,8 @@ def find_windows(
     windows: list[WindowInfo] = []
     for desktop_window in Toolkit.find_desktop_windows():
         hwnd = _handle_value(desktop_window.hwnd)
+        if hwnd == 0:
+            continue
         window_width, window_height = _rect_size(user32, "GetWindowRect", hwnd)
         client_width, client_height = _rect_size(user32, "GetClientRect", hwnd)
         client_x, client_y = _client_origin(user32, hwnd)

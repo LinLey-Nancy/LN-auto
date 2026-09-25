@@ -16,8 +16,9 @@ class _SuccessfulJob:
 
 
 class _FakeController:
-    def __init__(self) -> None:
+    def __init__(self, resolution: tuple[int, int] = (20, 20)) -> None:
         self.clicks: list[tuple[int, int]] = []
+        self.resolution = resolution
 
     def post_click(self, x: int, y: int) -> _SuccessfulJob:
         self.clicks.append((x, y))
@@ -65,3 +66,30 @@ class InputTestDiagnosticsTests(unittest.TestCase):
 
         self.assertEqual(controller.clicks, [(7, 7), (7, 7)])
         self.assertEqual(result.click_count, 2)
+
+    def test_screenshot_point_is_scaled_to_raw_controller_coordinates(self) -> None:
+        before = numpy.zeros((20, 20, 3), dtype=numpy.uint8)
+        after = before.copy()
+        after[5:10, 5:10] = 100
+        controller = _FakeController(resolution=(40, 60))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch(
+                "window_auto.diagnostics.input_test.capture_image",
+                side_effect=[before, after],
+            ):
+                result = run_input_test(
+                    controller,
+                    (7, 7),
+                    root / "before.png",
+                    root / "after.png",
+                    root / "difference.png",
+                    root / "report.json",
+                    click_interval_seconds=0,
+                    settle_seconds=0,
+                )
+
+        self.assertEqual(result.point, (7, 7))
+        self.assertEqual(result.input_point, (14, 21))
+        self.assertEqual(controller.clicks, [(14, 21), (14, 21)])

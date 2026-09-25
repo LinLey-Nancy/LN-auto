@@ -34,6 +34,7 @@ from window_auto.diagnostics.workspace import create_debug_workspace, configure_
 from window_auto.runtime.maa_runtime import get_maa_version
 from window_auto.runtime.task_runtime import TaskRuntimeError, run_task
 from window_auto.runtime.win32_controller import ControllerConnectionError
+from window_auto.paths import project_root
 from window_auto.windowing.selector import (
     WindowSelectionError,
     choose_window_by_index,
@@ -47,8 +48,29 @@ from window_auto.workflow.events import WorkflowEventType
 from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = project_root()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "default.json"
+
+
+class CliConfigError(RuntimeError):
+    """Raised when the main configuration cannot be loaded or validated."""
+
+
+def _load_cli_config(config_path: Path) -> dict:
+    try:
+        return load_config(config_path)
+    except (OSError, ValueError) as error:
+        raise CliConfigError(f"Configuration failed: {error}") from error
+
+
+def _read_stdin_line() -> str | None:
+    """Read one interactive input line, or None when stdin is unavailable."""
+    if sys.stdin is None:
+        return None
+    try:
+        return sys.stdin.readline().strip()
+    except (OSError, ValueError):
+        return None
 
 
 def configure_console() -> None:
@@ -63,7 +85,7 @@ def single_line(value: str) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="window-auto")
+    parser = argparse.ArgumentParser(prog="ln-auto")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     self_test = subparsers.add_parser(
@@ -274,17 +296,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def print_window_table(windows: list) -> None:
-    print("INDEX\tHWND\tVISIBLE\tMINIMIZED\tWINDOW\tCLIENT\tCLASS\tTITLE")
+def print_window_table(windows: list, file=None) -> None:
+    print("INDEX\tHWND\tVISIBLE\tMINIMIZED\tWINDOW\tCLIENT\tCLASS\tTITLE", file=file)
     for index, window in enumerate(windows):
         window_size = f"{window.window_width}x{window.window_height}"
         client_size = f"{window.client_width}x{window.client_height}"
         print(
             f"{index}\t0x{window.hwnd:X}\t{window.visible}\t{window.minimized}"
             f"\t{window_size}\t{client_size}\t{single_line(window.class_name)}"
-            f"\t{single_line(window.title)}"
+            f"\t{single_line(window.title)}",
+            file=file,
         )
-    print(f"Total: {len(windows)}")
+    print(f"Total: {len(windows)}", file=file)
 
 
 def run_window_list(
@@ -315,12 +338,23 @@ def run_window_choose(
         print("Window selection failed: no candidate windows are available.", file=sys.stderr)
         return 2
 
-    if not as_json or selected_index is None:
+    if not as_json:
         print_window_table(windows)
+    elif selected_index is None:
+        # Interactive JSON mode: the candidate table goes to stderr so that
+        # stdout carries only the final JSON document for pipe consumers.
+        print_window_table(windows, file=sys.stderr)
 
     if selected_index is None:
         print("Choose window index: ", end="", file=sys.stderr, flush=True)
-        value = sys.stdin.readline().strip()
+        value = _read_stdin_line()
+        if value is None:
+            print(
+                "Window selection failed: no interactive input is available; "
+                "use --index instead.",
+                file=sys.stderr,
+            )
+            return 2
         try:
             selected_index = int(value)
         except ValueError:
@@ -354,7 +388,11 @@ def choose_window_for_run(
     print_window_table(windows)
     if selected_index is None:
         print("Choose window index: ", end="", file=sys.stderr, flush=True)
-        value = sys.stdin.readline().strip()
+        value = _read_stdin_line()
+        if value is None:
+            raise WindowSelectionError(
+                "No interactive input is available; use --index instead."
+            )
         try:
             selected_index = int(value)
         except ValueError as error:
@@ -370,7 +408,7 @@ def run_program(
     selected_index: int | None,
     capture_requested: bool = False,
 ) -> int:
-    config = load_config(config_path)
+    config = _load_cli_config(config_path)
     workspace = create_debug_workspace(
         PROJECT_ROOT,
         config["diagnostics"]["debug_dir"],
@@ -461,7 +499,7 @@ def run_program(
 
 
 def run_template_match_program(args) -> int:
-    config = load_config(args.config)
+    config = _load_cli_config(args.config)
     workspace = create_debug_workspace(PROJECT_ROOT, config["diagnostics"]["debug_dir"])
     log_path = configure_file_logging(workspace)
     logger = logging.getLogger(__name__)
@@ -524,7 +562,7 @@ def run_template_match_program(args) -> int:
 
 
 def run_input_test_program(args) -> int:
-    config = load_config(args.config)
+    config = _load_cli_config(args.config)
     workspace = create_debug_workspace(PROJECT_ROOT, config["diagnostics"]["debug_dir"])
     log_path = configure_file_logging(workspace)
     logger = logging.getLogger(__name__)
@@ -553,7 +591,7 @@ def run_input_test_program(args) -> int:
             file=sys.stderr,
             flush=True,
         )
-        if sys.stdin.readline().strip() != "YES":
+        if _read_stdin_line() != "YES":
             print("Input test cancelled; no click was sent.")
             return 0
 
@@ -584,6 +622,7 @@ def run_input_test_program(args) -> int:
             report_path,
         )
         print(f"Double-click succeeded at: {result.point} ({result.click_count} click jobs)")
+        print(f"Controller input point: {result.input_point}")
         print(f"Visual change detected: {result.difference.visual_change_detected}")
         print(f"Changed pixel ratio: {result.difference.changed_pixel_ratio:.6f}")
         print(f"Mean absolute difference: {result.difference.mean_absolute_difference:.6f}")
@@ -610,7 +649,7 @@ def run_input_test_program(args) -> int:
 
 
 def run_template_action_program(args) -> int:
-    config = load_config(args.config)
+    config = _load_cli_config(args.config)
     workspace = create_debug_workspace(PROJECT_ROOT, config["diagnostics"]["debug_dir"])
     log_path = configure_file_logging(workspace)
     logger = logging.getLogger(__name__)
@@ -635,7 +674,7 @@ def run_template_action_program(args) -> int:
     print("Mouse input: Seize (the target window and physical mouse may be occupied briefly)")
     if not args.yes:
         print("Type YES to perform this action: ", end="", file=sys.stderr, flush=True)
-        if sys.stdin.readline().strip() != "YES":
+        if _read_stdin_line() != "YES":
             print("Template action cancelled; no input was sent.")
             return 0
 
@@ -676,6 +715,7 @@ def run_template_action_program(args) -> int:
         print(f"TemplateMatch score: {result.score}")
         print(f"Matched box: {result.box}")
         print(f"Action point: {result.point}")
+        print(f"Controller input point: {result.input_point}")
         print(f"Action succeeded: {result.action} ({result.click_count} click jobs)")
         print(f"Visual change detected: {result.difference.visual_change_detected}")
         print(f"Changed pixel ratio: {result.difference.changed_pixel_ratio:.6f}")
@@ -715,7 +755,7 @@ def run_template_action_program(args) -> int:
 
 
 def run_workflow_program(args) -> int:
-    config = load_config(args.config)
+    config = _load_cli_config(args.config)
     workspace = create_debug_workspace(PROJECT_ROOT, config["diagnostics"]["debug_dir"])
     log_path = configure_file_logging(workspace)
     logger = logging.getLogger(__name__)
@@ -752,7 +792,7 @@ def run_workflow_program(args) -> int:
     print("Mouse input: Seize (the target window and physical mouse may be occupied briefly)")
     if not args.yes:
         print("Type YES to perform this workflow: ", end="", file=sys.stderr, flush=True)
-        if sys.stdin.readline().strip() != "YES":
+        if _read_stdin_line() != "YES":
             print("Workflow cancelled; no input was sent.")
             return 0
 
@@ -801,7 +841,7 @@ def run_workflow_program(args) -> int:
 
 
 def run_workflow_v2_program(args) -> int:
-    config = load_config(args.config)
+    config = _load_cli_config(args.config)
     workspace = create_debug_workspace(PROJECT_ROOT, config["diagnostics"]["debug_dir"])
     log_path = configure_file_logging(workspace)
     logger = logging.getLogger(__name__)
@@ -841,7 +881,7 @@ def run_workflow_v2_program(args) -> int:
     print(f"Selected: 0x{window.hwnd:X} {window.class_name} {window.title}")
     if not args.yes:
         print("Type YES to perform this workflow: ", end="", file=sys.stderr, flush=True)
-        if sys.stdin.readline().strip() != "YES":
+        if _read_stdin_line() != "YES":
             print("Workflow cancelled; no input was sent.")
             return 0
 
@@ -868,8 +908,17 @@ def run_workflow_v2_program(args) -> int:
             direct_screen_input=profile.direct_screen_input,
         )
         result = WorkflowEngine(report_event).run(definition, session)
+        failed_steps = [step for step in result.steps if not step.succeeded]
         if result.cancelled:
             print("Workflow v2 cancelled.")
+        elif failed_steps:
+            failed_names = ", ".join(step.step_id for step in failed_steps)
+            print(
+                f"Workflow v2 finished with {len(failed_steps)} failed "
+                f"step(s): {failed_names}",
+                file=sys.stderr,
+            )
+            exit_code = 11
         else:
             print(f"Workflow v2 succeeded: {result.workflow_name}")
         logger.info(
@@ -900,7 +949,7 @@ def run_workflow_v2_program(args) -> int:
 
 
 def run_window_select(config_path: Path, as_json: bool) -> int:
-    config = load_config(config_path)
+    config = _load_cli_config(config_path)
     window_config = config["window"]
     try:
         window = select_target_window(
@@ -926,7 +975,7 @@ def run_window_select(config_path: Path, as_json: bool) -> int:
 
 
 def run_self_test(config_path: Path) -> int:
-    config = load_config(config_path)
+    config = _load_cli_config(config_path)
     required_directories = (
         PROJECT_ROOT / "assets" / "resource" / "pipeline",
         PROJECT_ROOT / "assets" / "resource" / "image",
@@ -951,6 +1000,14 @@ def run_self_test(config_path: Path) -> int:
 def main(argv: list[str] | None = None) -> int:
     configure_console()
     args = build_parser().parse_args(argv)
+    try:
+        return _dispatch(args)
+    except CliConfigError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
+def _dispatch(args) -> int:
     if args.command == "self-test":
         return run_self_test(args.config)
     if args.command == "maa-version":

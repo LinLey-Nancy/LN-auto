@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import re
+import tempfile
 from typing import Any
 
 from window_auto.workflow.loader import load_workflow_v2
@@ -173,16 +175,30 @@ class WorkflowDocument:
         step[field] = value
         self.dirty = True
 
-    def save(self, path: Path | None = None) -> Path:
+    def save(self, path: Path | None = None, project_root: Path | None = None) -> Path:
         output = (path or self.path)
         if output is None:
             raise ValueError("Workflow path has not been selected.")
         output = output.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            json.dumps(self.data, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        text = json.dumps(self.data, ensure_ascii=False, indent=2) + "\n"
+        if project_root is not None:
+            # Validate with the strict v2 loader before touching the target file,
+            # so the editor can never save a workflow it cannot reopen.
+            fd, temp_name = tempfile.mkstemp(
+                dir=output.parent, prefix=output.stem + "-", suffix=".json"
+            )
+            temp_path = Path(temp_name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(text)
+                load_workflow_v2(temp_path, project_root)
+                os.replace(temp_path, output)
+            except Exception:
+                temp_path.unlink(missing_ok=True)
+                raise
+        else:
+            output.write_text(text, encoding="utf-8")
         self.path = output
         self.dirty = False
         return output

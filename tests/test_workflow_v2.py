@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -275,6 +277,53 @@ class WorkflowV2LoaderTests(unittest.TestCase):
             with self.assertRaises(WorkflowV2ConfigError):
                 load_workflow_v2(path, root)
 
+    def test_huge_time_values_are_rejected(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "workflow.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "name": "huge",
+                        "settings": {"default_timeout_ms": 9007199254740993},
+                        "steps": [
+                            {"id": "w", "type": "wait", "name": "W", "duration_ms": 10}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "default_timeout_ms"):
+                load_workflow_v2(path, root)
+
+    def test_out_of_range_virtual_key_codes_are_rejected(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "workflow.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "name": "bad-key",
+                        "steps": [
+                            {
+                                "id": "k",
+                                "type": "key_press",
+                                "name": "K",
+                                "key": 300,
+                                "modifiers": ["CTRL", 999],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "virtual key"):
+                load_workflow_v2(path, root)
+
 
 class WorkflowV2ActionTests(unittest.TestCase):
     def test_mouse_and_keyboard_actions_use_maa_controller(self) -> None:
@@ -359,36 +408,6 @@ class WorkflowV2ActionTests(unittest.TestCase):
                 ("key_up", 0x10),
             ],
         )
-
-    def test_precise_foreground_click_bypasses_controller_coordinate_mapping(self) -> None:
-        session, context = _context()
-        session.config = {"controller": {"direct_screen_input": True}}
-        session.window = WindowInfo(
-            hwnd=123,
-            title="Application",
-            class_name="UnrealWindow",
-            window_width=1920,
-            window_height=1080,
-            client_width=1920,
-            client_height=1080,
-            visible=True,
-            minimized=False,
-        )
-
-        with patch("window_auto.workflow.actions.click_client_point") as direct_click:
-            execute_action(
-                MouseClickStep(
-                    id="precise-click",
-                    name="Precise click",
-                    x=1711,
-                    y=949,
-                    button="left",
-                ),
-                context,
-            )
-
-        direct_click.assert_called_once_with(session.window, (1711, 949), "left")
-        self.assertEqual(session.controller.calls, [])
 
     def test_precise_foreground_click_bypasses_controller_coordinate_mapping(self) -> None:
         session, context = _context()
@@ -711,6 +730,21 @@ class WorkflowV2ActionTests(unittest.TestCase):
         self.assertIn("[799,125,226,64]", message)
         self.assertIn("threshold 0.800", message)
 
+    def test_zero_attempts_raises_action_error_instead_of_crashing(self) -> None:
+        session, context = _context()
+        with patch("window_auto.workflow.actions.load_template_image"):
+            with self.assertRaisesRegex(WorkflowActionError, "at least 1"):
+                execute_action(
+                    TemplateMatchStep(
+                        id="find",
+                        name="Find",
+                        template_path=Path("template.png"),
+                        attempts=0,
+                        result_variable="match",
+                    ),
+                    context,
+                )
+
 
 class WorkflowV2EngineTests(unittest.TestCase):
     def test_engine_emits_events_and_runs_steps_in_order(self) -> None:
@@ -793,6 +827,122 @@ class WorkflowV2EngineTests(unittest.TestCase):
             sum(event.type == WorkflowEventType.STEP_FAILED for event in events),
             2,
         )
+
+    def test_default_timeout_fails_a_step_that_runs_too_long(self) -> None:
+        session = _Session()
+
+        def stuck(step, context):
+            context.cancellation.wait(5.0)
+
+        definition = WorkflowDefinition(
+            name="timeout",
+            settings=WorkflowSettings(stop_on_error=False, default_timeout_ms=100),
+            steps=(MouseClickStep(id="click", name="Click", x=1, y=2),),
+        )
+
+        with patch(
+            "window_auto.workflow.engine.execute_action", side_effect=stuck
+        ):
+            started = time.perf_counter()
+            result = WorkflowEngine().run(definition, session)
+            elapsed = time.perf_counter() - started
+
+        self.assertFalse(result.cancelled)
+        self.assertEqual(len(result.steps), 1)
+        self.assertFalse(result.steps[0].succeeded)
+        self.assertIn("timeout", result.steps[0].error.lower())
+        self.assertLess(elapsed, 2.0)
+
+    def test_default_timeout_stops_workflow_when_stop_on_error(self) -> None:
+        session = _Session()
+
+        def stuck(step, context):
+            context.cancellation.wait(5.0)
+
+        definition = WorkflowDefinition(
+            name="timeout-stop",
+            settings=WorkflowSettings(stop_on_error=True, default_timeout_ms=100),
+            steps=(MouseClickStep(id="click", name="Click", x=1, y=2),),
+        )
+
+        with patch(
+            "window_auto.workflow.engine.execute_action", side_effect=stuck
+        ):
+            with self.assertRaises(WorkflowExecutionError):
+                WorkflowEngine().run(definition, session)
+
+    def test_wait_step_may_exceed_default_timeout(self) -> None:
+        session = _Session()
+        definition = WorkflowDefinition(
+            name="wait-exempt",
+            settings=WorkflowSettings(default_timeout_ms=50),
+            steps=(WaitStep(id="wait", name="Wait", duration_ms=150),),
+        )
+
+        result = WorkflowEngine().run(definition, session)
+
+        self.assertFalse(result.cancelled)
+        self.assertTrue(result.steps[0].succeeded)
+
+    def test_user_cancel_still_interrupts_a_timed_step(self) -> None:
+        session = _Session()
+        token = CancellationToken()
+        definition = WorkflowDefinition(
+            name="cancel-timed",
+            settings=WorkflowSettings(default_timeout_ms=10_000),
+            steps=(
+                TextInputStep(
+                    id="type",
+                    name="Type",
+                    text="0123456789",
+                    interval_ms=200,
+                ),
+                MouseClickStep(id="click", name="Click", x=1, y=1),
+            ),
+        )
+        threading.Timer(0.15, token.cancel).start()
+
+        result = WorkflowEngine().run(definition, session, token)
+
+        self.assertTrue(result.cancelled)
+        self.assertNotIn(("click", 1, 1, 0), session.controller.calls)
+
+    def test_template_polling_budget_extends_the_default_timeout(self) -> None:
+        session = _Session()
+        miss = TemplateRecognitionResult(hit=False, score=None, box=None)
+        definition = WorkflowDefinition(
+            name="polling",
+            settings=WorkflowSettings(stop_on_error=False, default_timeout_ms=150),
+            steps=(
+                TemplateMatchStep(
+                    id="find",
+                    name="Find",
+                    on_failure="continue",
+                    template_path=Path("template.png"),
+                    attempts=3,
+                    interval_ms=200,
+                    result_variable="match",
+                ),
+            ),
+        )
+        with (
+            patch("window_auto.workflow.actions.load_template_image"),
+            patch(
+                "window_auto.workflow.actions.capture_image",
+                return_value=numpy.zeros((720, 1280, 3), dtype=numpy.uint8),
+            ),
+            patch("window_auto.workflow.actions.recognize_template", return_value=miss),
+        ):
+            started = time.perf_counter()
+            result = WorkflowEngine().run(definition, session)
+            elapsed = time.perf_counter() - started
+
+        # The step's own polling budget (3 x 200 ms) extends the 150 ms default,
+        # so all three attempts run and the step reports "not found".
+        self.assertGreaterEqual(elapsed, 0.35)
+        self.assertFalse(result.steps[0].succeeded)
+        self.assertIn("not found", result.steps[0].error)
+        self.assertNotIn("timeout", result.steps[0].error.lower())
 
 
 if __name__ == "__main__":

@@ -35,12 +35,13 @@ from window_auto.gui.property_editor import PropertyEditor
 from window_auto.gui.template_creator import TemplateCreationDialog
 from window_auto.gui.window_dialog import WindowSelectorDialog
 from window_auto.gui.worker import WorkflowWorker
+from window_auto.paths import project_root
 from window_auto.windowing.discovery import WindowInfo
 from window_auto.workflow.events import WorkflowEvent, WorkflowEventType
 from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = project_root()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "default.json"
 STARTUP_LOG_PATH = PROJECT_ROOT / "debug" / "startup.log"
 TEMPLATE_DIRECTORY = PROJECT_ROOT / "assets" / "resource" / "image"
@@ -63,10 +64,11 @@ class MainWindow(QMainWindow):
         self.selected_window: WindowInfo | None = None
         self._thread: QThread | None = None
         self._worker: WorkflowWorker | None = None
-        self.setWindowTitle("Window Auto 工作流编辑器")
+        self.setWindowTitle("LN-auto 工作流编辑器")
         self.resize(1360, 820)
         self.setMinimumSize(1024, 640)
         self._build_actions()
+        self._build_menus()
         self._build_toolbar()
         self._build_central()
         self._build_log_dock()
@@ -88,6 +90,13 @@ class MainWindow(QMainWindow):
         self.save_as_action = QAction("另存为", self)
         self.save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
         self.save_as_action.triggered.connect(lambda: self.save_document(save_as=True))
+
+    def _build_menus(self) -> None:
+        file_menu = self.menuBar().addMenu("文件(&F)")
+        file_menu.addAction(self.new_action)
+        file_menu.addAction(self.open_action)
+        file_menu.addAction(self.save_action)
+        file_menu.addAction(self.save_as_action)
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("主工具栏")
@@ -264,7 +273,7 @@ class MainWindow(QMainWindow):
     def _update_title(self) -> None:
         marker = " *" if self.document.dirty else ""
         path = self.document.path.name if self.document.path else "未命名"
-        self.setWindowTitle(f"{path}{marker} — Window Auto 工作流编辑器")
+        self.setWindowTitle(f"{path}{marker} — LN-auto 工作流编辑器")
 
     def add_selected_action(self) -> None:
         item = self.palette.currentItem() or self.palette.item(0)
@@ -390,6 +399,7 @@ class MainWindow(QMainWindow):
         self.document = WorkflowDocument()
         self.selected_window = None
         self.target_label.setText("未选择目标窗口")
+        self.target_label.setToolTip("")
         self._refresh_document()
 
     def open_document(self) -> None:
@@ -427,7 +437,14 @@ class MainWindow(QMainWindow):
                 return False
             path = Path(filename)
         try:
-            saved = self.document.save(path)
+            saved = self.document.save(path, PROJECT_ROOT)
+        except WorkflowV2ConfigError as error:
+            QMessageBox.critical(
+                self,
+                "无法保存工作流",
+                f"当前配置未通过校验，文件未保存。请修正后重试：\n{error}",
+            )
+            return False
         except Exception as error:
             QMessageBox.critical(self, "保存失败", str(error))
             return False
@@ -532,7 +549,8 @@ class MainWindow(QMainWindow):
     def on_workflow_finished(self, succeeded: bool, message: str) -> None:
         self.append_log(message)
         self.statusBar().showMessage(message, 8000)
-        if not succeeded and "已停止" not in message:
+        was_cancelled = self._worker is not None and self._worker.cancellation.cancelled
+        if not succeeded and not was_cancelled:
             QMessageBox.critical(
                 self,
                 "工作流运行失败",

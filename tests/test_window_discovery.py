@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from window_auto.windowing.discovery import WindowInfo, matches_filters
+from window_auto.windowing.discovery import WindowInfo, find_windows, matches_filters
 from window_auto.windowing.selector import (
     AmbiguousWindowError,
     WindowNotFoundError,
@@ -60,6 +61,21 @@ class WindowFilterTests(unittest.TestCase):
     def test_invalid_window_index_is_rejected(self) -> None:
         with self.assertRaises(WindowIndexError):
             choose_window_by_index([self.window], 1)
+
+    def test_null_handles_are_skipped_during_enumeration(self) -> None:
+        fake_desktop_windows = [
+            type("W", (), {"hwnd": None, "window_name": "ghost", "class_name": "X"})(),
+            type("W", (), {"hwnd": 0, "window_name": "zero", "class_name": "X"})(),
+            type("W", (), {"hwnd": 0x10, "window_name": "real", "class_name": "X"})(),
+        ]
+        with patch(
+            "maa.toolkit.Toolkit.find_desktop_windows",
+            return_value=fake_desktop_windows,
+        ):
+            windows = find_windows()
+
+        self.assertEqual([window.title for window in windows], ["real"])
+        self.assertEqual(windows[0].hwnd, 0x10)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,10 @@ from PIL import Image, ImageDraw
 
 from maa.controller import Win32Controller
 
+from window_auto.diagnostics.desktop_scope import (
+    DesktopCoordinateError,
+    scale_point_between_sizes,
+)
 from window_auto.diagnostics.input_test import VisualDifference, calculate_visual_difference
 from window_auto.diagnostics.screenshot import bgr_to_image, capture_image
 from window_auto.diagnostics.template_match import (
@@ -34,6 +38,7 @@ class TemplateNotFoundError(TemplateActionError):
 class TemplateActionResult:
     action: str
     point: tuple[int, int]
+    input_point: tuple[int, int]
     click_count: int
     score: float | None
     box: MatchBox
@@ -62,8 +67,23 @@ def action_click_count(action: str) -> int:
 
 
 def box_center(box: MatchBox) -> tuple[int, int]:
-    """Return the match center in recognition-image coordinates used by Maa input."""
+    """Return the match center in recognition-image (scaled screenshot) coordinates."""
     return box.x + box.w // 2, box.y + box.h // 2
+
+
+def controller_raw_resolution(controller: Win32Controller) -> tuple[int, int]:
+    """Read the raw client resolution that ``post_click`` expects."""
+    try:
+        raw_width, raw_height = (int(value) for value in controller.resolution)
+    except (TypeError, ValueError) as error:
+        raise TemplateActionError(
+            f"Controller reported an invalid raw resolution: {error}"
+        ) from error
+    if raw_width <= 0 or raw_height <= 0:
+        raise TemplateActionError(
+            f"Controller reported an invalid raw resolution {(raw_width, raw_height)!r}."
+        )
+    return raw_width, raw_height
 
 
 def run_template_action(
@@ -90,6 +110,17 @@ def run_template_action(
 
     click_count = action_click_count(action)
     point = box_center(recognition.box)
+    # post_click expects raw client coordinates, but recognition runs on the
+    # scaled screenshot; convert between the two coordinate spaces.
+    image_height, image_width = before.shape[:2]
+    try:
+        input_point = scale_point_between_sizes(
+            point,
+            (image_width, image_height),
+            controller_raw_resolution(controller),
+        )
+    except DesktopCoordinateError as error:
+        raise TemplateActionError(str(error)) from error
 
     annotated = bgr_to_image(before)
     draw = ImageDraw.Draw(annotated)
@@ -107,10 +138,11 @@ def run_template_action(
     )
 
     for click_index in range(click_count):
-        job = controller.post_click(*point).wait()
+        job = controller.post_click(*input_point).wait()
         if not job.succeeded:
             raise TemplateActionError(
-                f"MaaFramework click {click_index + 1}/{click_count} failed at {point!r}."
+                f"MaaFramework click {click_index + 1}/{click_count} failed at "
+                f"{input_point!r} (recognition point {point!r})."
             )
         if click_index + 1 < click_count:
             time.sleep(click_interval_seconds)
@@ -129,6 +161,7 @@ def run_template_action(
     report = {
         "action": action,
         "point": list(point),
+        "input_point": list(input_point),
         "click_count": click_count,
         "score": recognition.score,
         "box": asdict(box),
@@ -144,6 +177,7 @@ def run_template_action(
     return TemplateActionResult(
         action=action,
         point=point,
+        input_point=input_point,
         click_count=click_count,
         score=recognition.score,
         box=box,

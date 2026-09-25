@@ -30,8 +30,8 @@ def install_chinese_translations(app: QApplication) -> bool:
 def create_application(argv: list[str] | None = None) -> QApplication:
     app = QApplication(argv if argv is not None else sys.argv)
     install_chinese_translations(app)
-    app.setApplicationName("Window Auto")
-    app.setOrganizationName("Window Auto")
+    app.setApplicationName("LN-auto")
+    app.setOrganizationName("LN-auto")
     app.setStyle("Fusion")
     font_path = Path(r"C:\Windows\Fonts\msyh.ttc")
     if font_path.is_file():
@@ -44,7 +44,7 @@ def create_application(argv: list[str] | None = None) -> QApplication:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="window-auto-gui")
+    parser = argparse.ArgumentParser(prog="ln-auto-gui")
     parser.add_argument(
         "--smoke-test",
         action="store_true",

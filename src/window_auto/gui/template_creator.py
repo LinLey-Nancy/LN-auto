@@ -256,18 +256,27 @@ class TemplateCreationDialog(QDialog):
                 "请在截图中按住鼠标左键，拖动框选一个至少 2×2 像素的区域。",
             )
             return
-        output_path = unique_template_path(
-            self.template_directory,
-            self.name_edit.text(),
-        )
-        cropped = self._source_pixmap.copy(source_rect)
-        scaled = scale_crop_to_recognition(
-            cropped,
-            self._source_pixmap.size(),
-            self.recognition_size,
-        )
-        self.normalized_for_recognition = scaled.size() != cropped.size()
-        if scaled.isNull() or not scaled.save(str(output_path), "PNG"):
+        try:
+            output_path = unique_template_path(
+                self.template_directory,
+                self.name_edit.text(),
+            )
+            cropped = self._source_pixmap.copy(source_rect)
+            scaled = scale_crop_to_recognition(
+                cropped,
+                self._source_pixmap.size(),
+                self.recognition_size,
+            )
+            self.normalized_for_recognition = scaled.size() != cropped.size()
+            saved = not scaled.isNull() and scaled.save(str(output_path), "PNG")
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                "保存失败",
+                f"无法写入模板目录 {self.template_directory}：{error}",
+            )
+            return
+        if not saved:
             QMessageBox.critical(self, "保存失败", f"无法保存模板：{output_path}")
             return
         self.saved_path = output_path.resolve()
