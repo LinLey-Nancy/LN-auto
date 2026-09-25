@@ -19,6 +19,8 @@ assets/resource/image/*
 !assets/resource/image/.gitkeep
 projects/*
 !projects/.gitkeep
+workflow/*
+!workflow/.gitkeep
 config/workflow.local.json
 config/workflow.local.*.json
 

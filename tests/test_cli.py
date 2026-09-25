@@ -114,6 +114,43 @@ class WorkflowV2CliTests(unittest.TestCase):
         self.assertIn("Workflow v2 succeeded", stdout)
 
 
+class WorkflowPathResolutionTests(unittest.TestCase):
+    def test_relative_path_prefers_workflow_directory(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow_directory = root / "workflow"
+            workflow_directory.mkdir()
+            workflow = _write_workflow(workflow_directory)
+            with (
+                patch.object(cli, "PROJECT_ROOT", root),
+                patch.object(cli, "WORKFLOW_DIRECTORY", workflow_directory),
+            ):
+                resolved = cli.resolve_workflow_path(Path("workflow.json"))
+
+        self.assertEqual(resolved, workflow)
+
+    def test_relative_path_falls_back_to_project_root(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch.object(cli, "PROJECT_ROOT", root),
+                patch.object(cli, "WORKFLOW_DIRECTORY", root / "workflow"),
+            ):
+                resolved = cli.resolve_workflow_path(Path("missing.json"))
+
+        self.assertEqual(resolved, root / "missing.json")
+
+    def test_absolute_path_is_used_as_is(self) -> None:
+        absolute = Path.cwd() / "elsewhere.json"
+        with (
+            patch.object(cli, "PROJECT_ROOT", Path.cwd()),
+            patch.object(cli, "WORKFLOW_DIRECTORY", Path.cwd() / "workflow"),
+        ):
+            resolved = cli.resolve_workflow_path(absolute)
+
+        self.assertEqual(resolved, absolute)
+
+
 class CliRobustnessTests(unittest.TestCase):
     def test_missing_config_is_a_clean_error_not_a_traceback(self) -> None:
         stderr = io.StringIO()

@@ -7,7 +7,13 @@
   },
   "settings": {
     "stop_on_error": true,
-    "default_timeout_ms": 10000
+    "default_timeout_ms": 10000,
+    "auto_delay": {
+      "mode": "none",
+      "fixed_ms": 500,
+      "min_ms": 300,
+      "max_ms": 800
+    }
   },
   "steps": [
     {

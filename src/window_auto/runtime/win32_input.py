@@ -39,9 +39,9 @@ def click_client_point(
 ) -> tuple[int, int]:
     """Foreground ``window`` and click an exact client point in screen pixels."""
     if sys.platform != "win32":
-        raise DirectInputError("Precise foreground input is only supported on Windows.")
+        raise DirectInputError("前台精确输入仅支持 Windows 系统。")
     if button not in _BUTTON_FLAGS:
-        raise DirectInputError(f"Unsupported mouse button: {button!r}.")
+        raise DirectInputError(f"不支持的鼠标按键：{button!r}，请使用 left、right 或 middle。")
 
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     hwnd = wintypes.HWND(window.hwnd)
@@ -73,7 +73,7 @@ def click_client_point(
     ]
 
     if not user32.IsWindow(hwnd):
-        raise DirectInputError("The selected target window no longer exists.")
+        raise DirectInputError("目标窗口已关闭或不存在，未发送点击。请重新选择目标窗口后重试。")
     if user32.IsIconic(hwnd):
         user32.ShowWindowAsync(hwnd, 9)  # SW_RESTORE
         time.sleep(0.25)
@@ -90,34 +90,46 @@ def click_client_point(
         user32.SetForegroundWindow(hwnd)
     else:
         raise DirectInputError(
-            "Windows did not allow the selected target window to become foreground; "
-            "no click was sent."
+            "Windows 不允许目标窗口切换到前台，未发送点击。"
+            "请确认目标窗口未被全屏独占程序或远程桌面遮挡，然后重试。"
         )
 
     rect = _Rect()
     if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
-        raise DirectInputError("Failed to read the target window client rectangle.")
+        raise DirectInputError(
+            "无法读取目标窗口的客户区尺寸，未发送点击。请重新选择目标窗口后重试。"
+        )
     width = max(0, rect.right - rect.left)
     height = max(0, rect.bottom - rect.top)
     x, y = point
     if not 0 <= x < width or not 0 <= y < height:
         raise DirectInputError(
-            f"Click point {point!r} is outside the current client area {width}x{height}."
+            f"点击坐标 {point} 超出目标窗口当前客户区 {width}×{height}，未发送点击。"
+            "可参考编辑器右下角的实时鼠标坐标重新取点，或调整窗口大小后重试。"
         )
 
     screen_point = wintypes.POINT(x, y)
     if not user32.ClientToScreen(hwnd, ctypes.byref(screen_point)):
-        raise DirectInputError("Failed to map the click point into screen coordinates.")
+        raise DirectInputError(
+            "无法把点击坐标换算为屏幕坐标，未发送点击。请重新选择目标窗口后重试。"
+        )
     if not user32.SetCursorPos(screen_point.x, screen_point.y):
-        raise DirectInputError("Windows refused to position the cursor; no click was sent.")
+        raise DirectInputError(
+            "Windows 拒绝移动鼠标光标，未发送点击。"
+            "通常是权限不足：目标程序可能以管理员身份运行，"
+            "请尝试以管理员身份运行 LN-auto 后重试。"
+        )
     time.sleep(0.03)
 
     actual = wintypes.POINT()
     if not user32.GetCursorPos(ctypes.byref(actual)):
-        raise DirectInputError("Failed to verify the cursor position; no click was sent.")
+        raise DirectInputError(
+            "无法确认鼠标光标位置，未发送点击。请尝试以管理员身份运行 LN-auto 后重试。"
+        )
     if (actual.x, actual.y) != (screen_point.x, screen_point.y):
         raise DirectInputError(
-            "The target immediately moved or locked the cursor; no click was sent."
+            "目标程序移动或锁定了鼠标光标，未发送点击。"
+            "请退出目标程序的光标锁定（鼠标独占）模式，或改用其他输入策略后重试。"
         )
 
     down_flag, up_flag = _BUTTON_FLAGS[button]

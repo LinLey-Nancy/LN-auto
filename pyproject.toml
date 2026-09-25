@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "LN-auto"
-version = "0.1.0"
+version = "0.1.1"
 description = "Windows automation framework built on MaaFramework."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

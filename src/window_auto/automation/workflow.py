@@ -216,17 +216,17 @@ def run_workflow(
             except TemplateNotFoundError as error:
                 if attempt == step.recognition_attempts:
                     raise WorkflowExecutionError(
-                        f"Step {step.name!r} did not find its template after {attempt} attempt(s); "
-                        "no input was sent for this step."
+                        f"步骤“{step.name}”识别 {attempt} 次后仍未找到模板，"
+                        "本步骤未发送输入。请确认目标画面已显示，或重新截取模板。"
                     ) from error
                 time.sleep(step.recognition_interval_seconds)
 
         if result is None:
-            raise WorkflowExecutionError(f"Step {step.name!r} produced no result.")
+            raise WorkflowExecutionError(f"步骤“{step.name}”没有产生任何结果。")
         if step.require_visual_change and not result.difference.visual_change_detected:
             raise WorkflowExecutionError(
-                f"Step {step.name!r} sent input but no visual change was detected; "
-                "the workflow stopped without retrying the action."
+                f"步骤“{step.name}”已发送输入，但未检测到画面变化，"
+                "工作流已停止且不再重试。请确认输入已生效，或关闭该步骤的画面变化验证。"
             )
         step_results.append(WorkflowStepResult(step.name, attempt, result))
 

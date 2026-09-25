@@ -54,6 +54,39 @@ class GuiSmokeTests(unittest.TestCase):
         window.document.dirty = False
         window.close()
 
+    def test_add_button_inserts_below_selected_step(self) -> None:
+        window = MainWindow()
+
+        add_button = window.findChild(QPushButton, "insertStepButton")
+        self.assertIsNotNone(add_button)
+        self.assertEqual(add_button.text(), "插入到工作流")
+
+        window.palette.setCurrentRow(5)
+        window.add_selected_action()
+        window.add_selected_action()
+        window.step_list.setCurrentRow(0)
+        window.palette.setCurrentRow(2)
+        window.add_selected_action()
+
+        self.assertEqual(
+            [step["type"] for step in window.document.steps],
+            ["wait", "mouse_click", "wait"],
+        )
+        window.document.dirty = False
+        window.close()
+
+    def test_mouse_position_is_shown_in_status_bar_corner(self) -> None:
+        window = MainWindow()
+
+        self.assertTrue(window._mouse_timer.isActive())
+        window._update_mouse_position()
+        self.assertRegex(
+            window.mouse_position_label.text(),
+            r"鼠标 X: -?\d+  Y: -?\d+",
+        )
+        window.document.dirty = False
+        window.close()
+
     def test_main_window_displays_startup_log(self) -> None:
         with TemporaryDirectory() as directory:
             startup_log = Path(directory) / "startup.log"

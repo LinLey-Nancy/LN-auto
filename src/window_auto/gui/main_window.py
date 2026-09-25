@@ -6,12 +6,16 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QCursor, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDockWidget,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -20,6 +24,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QSpinBox,
     QSplitter,
     QStatusBar,
     QToolBar,
@@ -28,14 +33,14 @@ from PySide6.QtWidgets import (
 )
 
 from window_auto.application.input_profiles import INPUT_PROFILES, InputProfileName
-from window_auto.config.loader import load_config
+from window_auto.config.loader import MAX_TIME_MS, load_config
 from window_auto.diagnostics.workspace import create_debug_workspace
 from window_auto.gui.document import STEP_LABELS, WorkflowDocument
 from window_auto.gui.property_editor import PropertyEditor
 from window_auto.gui.template_creator import TemplateCreationDialog
 from window_auto.gui.window_dialog import WindowSelectorDialog
 from window_auto.gui.worker import WorkflowWorker
-from window_auto.paths import project_root
+from window_auto.paths import project_root, workflow_dir
 from window_auto.windowing.discovery import WindowInfo
 from window_auto.workflow.events import WorkflowEvent, WorkflowEventType
 from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
@@ -45,16 +50,57 @@ PROJECT_ROOT = project_root()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "default.json"
 STARTUP_LOG_PATH = PROJECT_ROOT / "debug" / "startup.log"
 TEMPLATE_DIRECTORY = PROJECT_ROOT / "assets" / "resource" / "image"
+WORKFLOW_DIRECTORY = workflow_dir()
 EVENT_LABELS = {
     WorkflowEventType.WORKFLOW_STARTED: "工作流已开始",
     WorkflowEventType.STEP_STARTED: "步骤已开始",
     WorkflowEventType.STEP_SUCCEEDED: "步骤已完成",
     WorkflowEventType.STEP_FAILED: "步骤失败",
     WorkflowEventType.STEP_SKIPPED: "步骤已跳过",
+    WorkflowEventType.AUTO_DELAY: "自动延迟",
     WorkflowEventType.WORKFLOW_CANCELLED: "工作流已停止",
     WorkflowEventType.WORKFLOW_FAILED: "工作流失败",
     WorkflowEventType.WORKFLOW_SUCCEEDED: "工作流已完成",
 }
+
+
+class AutoDelayRangeDialog(QDialog):
+    """Dialog for entering the random auto-delay range in milliseconds."""
+
+    def __init__(self, min_ms: int, max_ms: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("随机延迟")
+        layout = QVBoxLayout(self)
+        hint = QLabel("每两个步骤之间，在范围内随机延迟（毫秒）：")
+        hint.setObjectName("mutedLabel")
+        layout.addWidget(hint)
+        form = QFormLayout()
+        self.min_spin = QSpinBox()
+        self.min_spin.setRange(0, MAX_TIME_MS)
+        self.min_spin.setSingleStep(50)
+        self.min_spin.setValue(min_ms)
+        self.max_spin = QSpinBox()
+        self.max_spin.setRange(0, MAX_TIME_MS)
+        self.max_spin.setSingleStep(50)
+        self.max_spin.setValue(max_ms)
+        form.addRow("最短延迟：", self.min_spin)
+        form.addRow("最长延迟：", self.max_spin)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _accept(self) -> None:
+        if self.min_spin.value() > self.max_spin.value():
+            QMessageBox.warning(self, "范围无效", "最短延迟不能大于最长延迟。")
+            return
+        self.accept()
+
+    def values(self) -> tuple[int, int]:
+        return self.min_spin.value(), self.max_spin.value()
 
 
 class MainWindow(QMainWindow):
@@ -75,7 +121,19 @@ class MainWindow(QMainWindow):
         self._load_startup_log()
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("就绪")
+        self.mouse_position_label = QLabel()
+        self.mouse_position_label.setObjectName("mutedLabel")
+        self.statusBar().addPermanentWidget(self.mouse_position_label)
+        self._mouse_timer = QTimer(self)
+        self._mouse_timer.setInterval(100)
+        self._mouse_timer.timeout.connect(self._update_mouse_position)
+        self._mouse_timer.start()
+        self._update_mouse_position()
         self._refresh_document()
+
+    def _update_mouse_position(self) -> None:
+        position = QCursor.pos()
+        self.mouse_position_label.setText(f"鼠标 X: {position.x()}  Y: {position.y()}")
 
     def _build_actions(self) -> None:
         self.new_action = QAction("新建", self)
@@ -171,7 +229,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 12, 8, 12)
         title = QLabel("动作组件")
         title.setObjectName("sectionTitle")
-        help_text = QLabel("双击动作，或选择后点击“添加”。")
+        help_text = QLabel("双击动作，或选择后点击“插入”。")
         help_text.setObjectName("mutedLabel")
         self.palette = QListWidget()
         for step_type, label in STEP_LABELS.items():
@@ -179,7 +237,8 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, step_type)
             self.palette.addItem(item)
         self.palette.itemDoubleClicked.connect(lambda _item: self.add_selected_action())
-        add_button = QPushButton("添加到工作流")
+        add_button = QPushButton("插入到工作流")
+        add_button.setObjectName("insertStepButton")
         add_button.clicked.connect(self.add_selected_action)
         layout.addWidget(title)
         layout.addWidget(help_text)
@@ -194,11 +253,17 @@ class MainWindow(QMainWindow):
         title_row = QHBoxLayout()
         title = QLabel("工作流步骤")
         title.setObjectName("sectionTitle")
-        self.workflow_name = QLabel()
-        self.workflow_name.setObjectName("mutedLabel")
+        delay_label = QLabel("自动延迟：")
+        delay_label.setObjectName("mutedLabel")
+        self.auto_delay_combo = QComboBox()
+        self.auto_delay_combo.addItem("无自动延迟", "none")
+        self.auto_delay_combo.addItem("固定延迟", "fixed")
+        self.auto_delay_combo.addItem("随机延迟", "random")
+        self.auto_delay_combo.activated.connect(self._on_auto_delay_selected)
         title_row.addWidget(title)
         title_row.addStretch()
-        title_row.addWidget(self.workflow_name)
+        title_row.addWidget(delay_label)
+        title_row.addWidget(self.auto_delay_combo)
         self.step_list = QListWidget()
         self.step_list.setAlternatingRowColors(True)
         self.step_list.currentRowChanged.connect(self.select_step)
@@ -245,7 +310,7 @@ class MainWindow(QMainWindow):
                 self.append_log(f"启动 · {line}")
 
     def _refresh_document(self, selected_row: int | None = None) -> None:
-        self.workflow_name.setText(self.document.name)
+        self._sync_auto_delay_combo()
         self.step_list.clear()
         for index, step in enumerate(self.document.steps, start=1):
             enabled = "" if step.get("enabled", True) else "（已禁用）"
@@ -275,9 +340,62 @@ class MainWindow(QMainWindow):
         path = self.document.path.name if self.document.path else "未命名"
         self.setWindowTitle(f"{path}{marker} — LN-auto 工作流编辑器")
 
+    def _sync_auto_delay_combo(self) -> None:
+        mode = str(self.document.auto_delay.get("mode", "none"))
+        index = self.auto_delay_combo.findData(mode)
+        self.auto_delay_combo.setCurrentIndex(max(index, 0))
+
+    def _on_auto_delay_selected(self, index: int) -> None:
+        mode = str(self.auto_delay_combo.itemData(index))
+        settings = dict(self.document.auto_delay)
+        if mode == "fixed":
+            value, accepted = QInputDialog.getInt(
+                self,
+                "固定延迟",
+                "每两个步骤之间延迟（毫秒）：",
+                int(settings.get("fixed_ms", 500)),
+                0,
+                MAX_TIME_MS,
+                50,
+            )
+            if not accepted:
+                self._sync_auto_delay_combo()
+                return
+            settings["fixed_ms"] = value
+        elif mode == "random":
+            dialog = AutoDelayRangeDialog(
+                int(settings.get("min_ms", 300)),
+                int(settings.get("max_ms", 800)),
+                self,
+            )
+            if not dialog.exec():
+                self._sync_auto_delay_combo()
+                return
+            settings["min_ms"], settings["max_ms"] = dialog.values()
+        try:
+            self.document.set_auto_delay(
+                mode,
+                fixed_ms=int(settings.get("fixed_ms", 500)),
+                min_ms=int(settings.get("min_ms", 300)),
+                max_ms=int(settings.get("max_ms", 800)),
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "自动延迟设置无效", str(error))
+            self._sync_auto_delay_combo()
+            return
+        self._update_title()
+        label = self.auto_delay_combo.itemText(index)
+        self.statusBar().showMessage(f"自动延迟已设置为：{label}", 5000)
+        self.append_log(f"自动延迟已设置为：{label}")
+
     def add_selected_action(self) -> None:
         item = self.palette.currentItem() or self.palette.item(0)
-        index = self.document.add_step(item.data(Qt.ItemDataRole.UserRole))
+        row = self.step_list.currentRow()
+        if 0 <= row < len(self.document.steps):
+            position = row + 1
+        else:
+            position = len(self.document.steps)
+        index = self.document.insert_step(item.data(Qt.ItemDataRole.UserRole), position)
         self._refresh_document(index)
 
     def select_step(self, row: int) -> None:
@@ -408,7 +526,7 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getOpenFileName(
             self,
             "打开工作流",
-            str(PROJECT_ROOT / "config"),
+            str(WORKFLOW_DIRECTORY),
             "工作流 JSON (*.json)",
         )
         if not filename:
@@ -430,7 +548,7 @@ class MainWindow(QMainWindow):
             filename, _ = QFileDialog.getSaveFileName(
                 self,
                 "保存工作流",
-                str(PROJECT_ROOT / "config" / "workflow.local.json"),
+                str(WORKFLOW_DIRECTORY / "workflow.local.json"),
                 "工作流 JSON (*.json)",
             )
             if not filename:

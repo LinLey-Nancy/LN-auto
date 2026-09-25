@@ -8,6 +8,7 @@ from typing import Any
 
 from window_auto.config.loader import MAX_TIME_MS
 from window_auto.workflow.model import (
+    AutoDelay,
     KeyPressStep,
     MouseClickStep,
     MouseMoveStep,
@@ -346,6 +347,26 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
     )
 
 
+def _load_auto_delay(value: Any) -> AutoDelay:
+    context = "workflow.settings.auto_delay"
+    if value is None:
+        return AutoDelay()
+    raw = _object(value, context)
+    _reject_unknown(raw, {"mode", "fixed_ms", "min_ms", "max_ms"}, context)
+    mode = raw.get("mode", "none")
+    if mode not in {"none", "fixed", "random"}:
+        raise WorkflowV2ConfigError(f"{context}.mode must be 'none', 'fixed' or 'random'.")
+    auto_delay = AutoDelay(
+        mode=mode,
+        fixed_ms=_integer(raw, "fixed_ms", context, default=0, maximum=MAX_TIME_MS),
+        min_ms=_integer(raw, "min_ms", context, default=0, maximum=MAX_TIME_MS),
+        max_ms=_integer(raw, "max_ms", context, default=0, maximum=MAX_TIME_MS),
+    )
+    if auto_delay.min_ms > auto_delay.max_ms:
+        raise WorkflowV2ConfigError(f"{context}.min_ms must not exceed max_ms.")
+    return auto_delay
+
+
 def load_workflow_v2(path: Path, project_root: Path) -> WorkflowDefinition:
     try:
         raw = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -384,7 +405,7 @@ def load_workflow_v2(path: Path, project_root: Path) -> WorkflowDefinition:
         raw_settings = _object(root["settings"], "workflow.settings")
         _reject_unknown(
             raw_settings,
-            {"stop_on_error", "default_timeout_ms"},
+            {"stop_on_error", "default_timeout_ms", "auto_delay"},
             "workflow.settings",
         )
         stop_on_error = raw_settings.get("stop_on_error", True)
@@ -400,6 +421,7 @@ def load_workflow_v2(path: Path, project_root: Path) -> WorkflowDefinition:
                 minimum=1,
                 maximum=MAX_TIME_MS,
             ),
+            auto_delay=_load_auto_delay(raw_settings.get("auto_delay")),
         )
 
     raw_steps = root.get("steps")

@@ -8,6 +8,17 @@ from typing import Literal, TypeAlias
 
 
 FailurePolicy: TypeAlias = Literal["stop", "continue", "retry"]
+AutoDelayMode: TypeAlias = Literal["none", "fixed", "random"]
+
+
+@dataclass(frozen=True, slots=True)
+class AutoDelay:
+    """Delay applied automatically between consecutive steps at runtime."""
+
+    mode: AutoDelayMode = "none"
+    fixed_ms: int = 0
+    min_ms: int = 0
+    max_ms: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +31,7 @@ class WindowTarget:
 class WorkflowSettings:
     stop_on_error: bool = True
     default_timeout_ms: int = 10_000
+    auto_delay: AutoDelay = AutoDelay()
 
 
 @dataclass(frozen=True, slots=True)

@@ -69,6 +69,14 @@ STEP_LABELS = {
     "wait": "延迟",
 }
 
+AUTO_DELAY_DEFAULTS: dict[str, Any] = {
+    "mode": "none",
+    "fixed_ms": 500,
+    "min_ms": 300,
+    "max_ms": 800,
+}
+AUTO_DELAY_MODES = ("none", "fixed", "random")
+
 
 class WorkflowDocument:
     def __init__(self, data: dict[str, Any] | None = None, path: Path | None = None) -> None:
@@ -82,7 +90,11 @@ class WorkflowDocument:
             "version": 2,
             "name": "未命名工作流",
             "target": {"title_pattern": "", "class_name": None},
-            "settings": {"stop_on_error": True, "default_timeout_ms": 10_000},
+            "settings": {
+                "stop_on_error": True,
+                "default_timeout_ms": 10_000,
+                "auto_delay": dict(AUTO_DELAY_DEFAULTS),
+            },
             "steps": [],
         }
 
@@ -100,6 +112,34 @@ class WorkflowDocument:
     def steps(self) -> list[dict[str, Any]]:
         return self.data["steps"]
 
+    @property
+    def auto_delay(self) -> dict[str, Any]:
+        settings = self.data.setdefault("settings", {})
+        delay = settings.setdefault("auto_delay", dict(AUTO_DELAY_DEFAULTS))
+        for key, value in AUTO_DELAY_DEFAULTS.items():
+            delay.setdefault(key, value)
+        return delay
+
+    def set_auto_delay(
+        self,
+        mode: str,
+        *,
+        fixed_ms: int,
+        min_ms: int,
+        max_ms: int,
+    ) -> None:
+        if mode not in AUTO_DELAY_MODES:
+            raise ValueError(f"未知的自动延迟模式：{mode}")
+        if int(min_ms) > int(max_ms):
+            raise ValueError("最短延迟不能大于最长延迟。")
+        self.data.setdefault("settings", {})["auto_delay"] = {
+            "mode": mode,
+            "fixed_ms": int(fixed_ms),
+            "min_ms": int(min_ms),
+            "max_ms": int(max_ms),
+        }
+        self.dirty = True
+
     def set_name(self, name: str) -> None:
         name = name.strip()
         if name and name != self.name:
@@ -114,8 +154,12 @@ class WorkflowDocument:
         self.dirty = True
 
     def add_step(self, step_type: str) -> int:
+        return self.insert_step(step_type, len(self.steps))
+
+    def insert_step(self, step_type: str, position: int) -> int:
         if step_type not in STEP_DEFAULTS:
             raise ValueError(f"Unsupported step type: {step_type}")
+        position = min(max(position, 0), len(self.steps))
         existing = {str(step.get("id", "")) for step in self.steps}
         base_id = step_type.replace("_", "-")
         sequence = 1
@@ -131,9 +175,9 @@ class WorkflowDocument:
             "on_failure": "stop",
             **deepcopy(STEP_DEFAULTS[step_type]),
         }
-        self.steps.append(step)
+        self.steps.insert(position, step)
         self.dirty = True
-        return len(self.steps) - 1
+        return position
 
     def remove_step(self, index: int) -> None:
         del self.steps[index]

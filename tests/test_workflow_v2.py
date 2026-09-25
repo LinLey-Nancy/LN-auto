@@ -23,6 +23,7 @@ from window_auto.workflow.engine import WorkflowEngine, WorkflowExecutionError
 from window_auto.workflow.events import WorkflowEventType
 from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
 from window_auto.workflow.model import (
+    AutoDelay,
     KeyPressStep,
     MouseClickStep,
     MouseMoveStep,
@@ -481,7 +482,9 @@ class WorkflowV2ActionTests(unittest.TestCase):
         session = _Session()
         cancellation = Mock()
         context = ExecutionContext(session=session, cancellation=cancellation)
-        with patch("window_auto.workflow.actions.randint", return_value=275) as random_value:
+        with patch(
+            "window_auto.workflow.actions._WAIT_RANDOM.randint", return_value=275
+        ) as random_value:
             result = execute_action(
                 WaitStep(
                     id="delay",
@@ -726,14 +729,14 @@ class WorkflowV2ActionTests(unittest.TestCase):
             )
 
         message = str(raised.exception)
-        self.assertIn("Best candidate score 0.451", message)
+        self.assertIn("最接近的候选得分 0.451", message)
         self.assertIn("[799,125,226,64]", message)
-        self.assertIn("threshold 0.800", message)
+        self.assertIn("低于识别阈值 0.800", message)
 
     def test_zero_attempts_raises_action_error_instead_of_crashing(self) -> None:
         session, context = _context()
         with patch("window_auto.workflow.actions.load_template_image"):
-            with self.assertRaisesRegex(WorkflowActionError, "at least 1"):
+            with self.assertRaisesRegex(WorkflowActionError, "至少为 1"):
                 execute_action(
                     TemplateMatchStep(
                         id="find",
@@ -850,7 +853,7 @@ class WorkflowV2EngineTests(unittest.TestCase):
         self.assertFalse(result.cancelled)
         self.assertEqual(len(result.steps), 1)
         self.assertFalse(result.steps[0].succeeded)
-        self.assertIn("timeout", result.steps[0].error.lower())
+        self.assertIn("超时", result.steps[0].error)
         self.assertLess(elapsed, 2.0)
 
     def test_default_timeout_stops_workflow_when_stop_on_error(self) -> None:
@@ -941,8 +944,163 @@ class WorkflowV2EngineTests(unittest.TestCase):
         # so all three attempts run and the step reports "not found".
         self.assertGreaterEqual(elapsed, 0.35)
         self.assertFalse(result.steps[0].succeeded)
-        self.assertIn("not found", result.steps[0].error)
-        self.assertNotIn("timeout", result.steps[0].error.lower())
+        self.assertIn("未找到模板", result.steps[0].error)
+        self.assertNotIn("超时", result.steps[0].error)
+
+
+def _write_settings_workflow(root: Path, settings: dict) -> Path:
+    path = root / "workflow.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "name": "auto delay",
+                "settings": settings,
+                "steps": [
+                    {"id": "click", "type": "mouse_click", "name": "click", "x": 1, "y": 1}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+class AutoDelayLoaderTests(unittest.TestCase):
+    def test_auto_delay_defaults_to_none(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            definition = load_workflow_v2(_write_settings_workflow(root, {}), root)
+
+        self.assertEqual(definition.settings.auto_delay.mode, "none")
+
+    def test_fixed_auto_delay_is_loaded(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            definition = load_workflow_v2(
+                _write_settings_workflow(
+                    root, {"auto_delay": {"mode": "fixed", "fixed_ms": 250}}
+                ),
+                root,
+            )
+
+        self.assertEqual(definition.settings.auto_delay.mode, "fixed")
+        self.assertEqual(definition.settings.auto_delay.fixed_ms, 250)
+
+    def test_random_auto_delay_is_loaded(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            definition = load_workflow_v2(
+                _write_settings_workflow(
+                    root,
+                    {"auto_delay": {"mode": "random", "min_ms": 100, "max_ms": 900}},
+                ),
+                root,
+            )
+
+        self.assertEqual(definition.settings.auto_delay.mode, "random")
+        self.assertEqual(definition.settings.auto_delay.min_ms, 100)
+        self.assertEqual(definition.settings.auto_delay.max_ms, 900)
+
+    def test_auto_delay_rejects_unknown_mode(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = _write_settings_workflow(
+                root, {"auto_delay": {"mode": "chaotic", "fixed_ms": 100}}
+            )
+
+            with self.assertRaises(WorkflowV2ConfigError):
+                load_workflow_v2(path, root)
+
+    def test_auto_delay_rejects_min_above_max(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = _write_settings_workflow(
+                root, {"auto_delay": {"mode": "random", "min_ms": 900, "max_ms": 100}}
+            )
+
+            with self.assertRaises(WorkflowV2ConfigError):
+                load_workflow_v2(path, root)
+
+    def test_auto_delay_rejects_unknown_fields(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = _write_settings_workflow(
+                root, {"auto_delay": {"mode": "fixed", "fixed_ms": 100, "typo": 1}}
+            )
+
+            with self.assertRaises(WorkflowV2ConfigError):
+                load_workflow_v2(path, root)
+
+
+class _RecordingToken(CancellationToken):
+    def __init__(self) -> None:
+        super().__init__()
+        self.waits: list[float] = []
+
+    def wait(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        super().wait(seconds)
+
+
+class AutoDelayEngineTests(unittest.TestCase):
+    def _two_click_definition(self, auto_delay: AutoDelay) -> WorkflowDefinition:
+        return WorkflowDefinition(
+            name="auto-delay",
+            settings=WorkflowSettings(auto_delay=auto_delay),
+            steps=(
+                MouseClickStep(id="a", name="A", x=1, y=1),
+                MouseClickStep(id="b", name="B", x=2, y=2),
+            ),
+        )
+
+    def test_fixed_auto_delay_waits_once_between_two_steps(self) -> None:
+        token = _RecordingToken()
+        definition = self._two_click_definition(AutoDelay(mode="fixed", fixed_ms=60))
+
+        WorkflowEngine().run(definition, _Session(), token)
+
+        self.assertEqual(len(token.waits), 1)
+        self.assertAlmostEqual(token.waits[0], 0.06, places=3)
+
+    def test_no_auto_delay_when_mode_is_none(self) -> None:
+        token = _RecordingToken()
+        definition = self._two_click_definition(AutoDelay(mode="none"))
+
+        WorkflowEngine().run(definition, _Session(), token)
+
+        self.assertEqual(token.waits, [])
+
+    def test_random_auto_delay_stays_within_range(self) -> None:
+        token = _RecordingToken()
+        definition = self._two_click_definition(
+            AutoDelay(mode="random", min_ms=40, max_ms=40)
+        )
+
+        WorkflowEngine().run(definition, _Session(), token)
+
+        self.assertEqual(len(token.waits), 1)
+        self.assertAlmostEqual(token.waits[0], 0.04, places=3)
+
+    def test_auto_delay_emits_event(self) -> None:
+        events = []
+        definition = self._two_click_definition(AutoDelay(mode="fixed", fixed_ms=10))
+
+        WorkflowEngine(events.append).run(definition, _Session())
+
+        delay_events = [
+            event for event in events if event.type == WorkflowEventType.AUTO_DELAY
+        ]
+        self.assertEqual(len(delay_events), 1)
+        self.assertIn("10", delay_events[0].message)
+
+    def test_random_source_is_unpredictable_system_random(self) -> None:
+        import random
+
+        from window_auto.workflow import actions, engine
+
+        self.assertIsInstance(engine._AUTO_DELAY_RANDOM, random.SystemRandom)
+        self.assertIsInstance(actions._WAIT_RANDOM, random.SystemRandom)
 
 
 if __name__ == "__main__":

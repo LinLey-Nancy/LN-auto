@@ -67,6 +67,9 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 [Files]
 Source: "{{#AppDir}}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Dirs]
+Name: "{{app}}\\workflow"; Flags: uninsneveruninstall
+
 [Icons]
 Name: "{{autoprograms}}\\{app_name}"; Filename: "{{app}}\\{app_name}.exe"
 Name: "{{autodesktop}}\\{app_name}"; Filename: "{{app}}\\{app_name}.exe"; Tasks: desktopicon

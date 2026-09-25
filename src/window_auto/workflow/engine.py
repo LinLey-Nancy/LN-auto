@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import random
 import threading
 
 from window_auto.application.session import AutomationSession
@@ -12,6 +13,7 @@ from window_auto.workflow.actions import ActionResult, TemplateNotFoundError, ex
 from window_auto.workflow.context import CancellationToken, ExecutionContext, WorkflowCancelled
 from window_auto.workflow.events import WorkflowEvent, WorkflowEventType
 from window_auto.workflow.model import (
+    AutoDelay,
     KeyPressStep,
     MouseClickStep,
     TemplateMatchStep,
@@ -19,6 +21,11 @@ from window_auto.workflow.model import (
     WaitStep,
     WorkflowDefinition,
 )
+
+
+# SystemRandom draws from the OS entropy source, so random delays cannot be
+# predicted or reproduced from a seeded pseudo-random sequence.
+_AUTO_DELAY_RANDOM = random.SystemRandom()
 
 
 class WorkflowExecutionError(RuntimeError):
@@ -85,7 +92,7 @@ class WorkflowEngine:
         self._emit(WorkflowEventType.WORKFLOW_STARTED, definition)
 
         try:
-            for step in definition.steps:
+            for index, step in enumerate(definition.steps):
                 cancellation.check()
                 if not step.enabled:
                     self._emit(WorkflowEventType.STEP_SKIPPED, definition, step=step)
@@ -135,7 +142,7 @@ class WorkflowEngine:
                         )
                         if should_stop:
                             raise WorkflowExecutionError(
-                                f"Step {step.name!r} failed: {error}"
+                                f"步骤“{step.name}”失败：{error}"
                             ) from error
                         break
                     else:
@@ -153,6 +160,7 @@ class WorkflowEngine:
                             details={"output": action_result.output},
                         )
                         break
+                self._apply_auto_delay(definition, cancellation, index, step)
         except WorkflowCancelled:
             self._emit(WorkflowEventType.WORKFLOW_CANCELLED, definition)
             return WorkflowRunResult(definition.name, tuple(results), cancelled=True)
@@ -166,6 +174,31 @@ class WorkflowEngine:
 
         self._emit(WorkflowEventType.WORKFLOW_SUCCEEDED, definition)
         return WorkflowRunResult(definition.name, tuple(results))
+
+    def _apply_auto_delay(
+        self,
+        definition: WorkflowDefinition,
+        cancellation: CancellationToken,
+        step_index: int,
+        step,
+    ) -> None:
+        auto_delay: AutoDelay = definition.settings.auto_delay
+        if step_index + 1 >= len(definition.steps) or auto_delay.mode == "none":
+            return
+        if auto_delay.mode == "fixed":
+            delay_ms = auto_delay.fixed_ms
+        else:
+            delay_ms = _AUTO_DELAY_RANDOM.randint(auto_delay.min_ms, auto_delay.max_ms)
+        if delay_ms <= 0:
+            return
+        self._emit(
+            WorkflowEventType.AUTO_DELAY,
+            definition,
+            step=step,
+            message=f"自动延迟 {delay_ms} 毫秒",
+            details={"auto_delay_ms": delay_ms, "mode": auto_delay.mode},
+        )
+        cancellation.wait(delay_ms / 1000.0)
 
     def _execute_step(
         self,
@@ -203,9 +236,10 @@ class WorkflowEngine:
             if cancellation.cancelled or not step_token.cancelled:
                 raise
             raise WorkflowStepTimeoutError(
-                f"Step exceeded the timeout of {timeout_ms} ms "
-                f"(default {definition.settings.default_timeout_ms} ms plus the "
-                "step's own configured waits); it was stopped at the next safe boundary."
+                f"步骤执行超时：超过 {timeout_ms} 毫秒限制（默认 "
+                f"{definition.settings.default_timeout_ms} 毫秒，"
+                "另加步骤自身配置的等待时间），已在安全边界停止。"
+                "可在工作流设置中调大 default_timeout_ms 后重试。"
             ) from None
         finally:
             watchdog.cancel()

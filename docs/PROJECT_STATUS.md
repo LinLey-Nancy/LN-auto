@@ -1,6 +1,6 @@
 # LN-auto 项目状态与路线图
 
-更新时间：2026-09-25
+更新时间：2026-09-26
 
 ## 项目目标
 
@@ -13,6 +13,15 @@ LN-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终�
 - 工作流保存、加载、调试与发布
 
 项目以“输入发送成功不等于目标应用已经处理输入”为安全原则。正式流程应通过模板、截图变化或其他可观测状态验证操作结果。
+
+## 2026-09-26 更新内容
+
+- 安装目录新增 `workflow/` 文件夹（与 `_internal/` 同级，卸载时保留）：`paths.workflow_dir()` 在打包模式下解析为可执行文件旁目录、源码模式下为仓库根 `workflow/`，首次启动自动创建；Inno 安装脚本通过 `[Dirs]` 创建。GUI 打开/保存工作流对话框默认指向该目录；CLI `--workflow` 相对路径优先在 `workflow/` 中查找，找不到时回退项目根。
+- 工作流步骤面板右上角移除“未命名工作流”文案，改为「自动延迟」下拉：无自动延迟（默认）/固定延迟/随机延迟，选择固定或随机时弹窗设置毫秒值或范围，随工作流 JSON 的 `settings.auto_delay` 持久化。步骤列表不插入额外延迟步骤；引擎在每两个步骤之间按设置延迟，并发出 `auto_delay` 事件写入运行日志。
+- 随机延迟统一改用 `random.SystemRandom`（操作系统熵源，不可被种子预测）：新增引擎 `_AUTO_DELAY_RANDOM`，同时替换 wait 步骤原先的 `random.randint` 全局伪随机。
+- 主窗口状态栏右下角常驻显示鼠标屏幕坐标（`QTimer` 每 100 ms 刷新 `QCursor.pos()`），方便填写点击/移动步骤的坐标。
+- 「添加到工作流」按钮更名「插入到工作流」：新动作不再总是追加到末尾，而是插入到当前选中步骤的下方（无选中时仍追加到末尾；双击动作组件行为相同），`WorkflowDocument` 新增 `insert_step(step_type, position)`。
+- 运行期报错全面汉化并附用户可执行的解决建议：`win32_input.py` 的 `DirectInputError`（权限不足时提示「以管理员身份运行 LN-auto」、前台切换失败、坐标越界提示参考右下角实时坐标等）、`workflow/actions.py`（模板未找到附候选得分与降阈值建议、识别变量缺失、Maa 操作失败等）、`workflow/engine.py`（步骤失败、步骤超时附调大 `default_timeout_ms` 建议）及 v1 链路 `template_action.py`/`automation/workflow.py`。配置文件校验类报错（loader）仍为英文，未在本次范围。
 
 ## 2026-09-25 更新内容
 

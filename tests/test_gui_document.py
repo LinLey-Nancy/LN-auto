@@ -24,6 +24,30 @@ class WorkflowDocumentTests(unittest.TestCase):
         self.assertEqual(len(document.steps), 1)
         self.assertTrue(document.dirty)
 
+    def test_insert_step_places_step_at_position(self) -> None:
+        document = WorkflowDocument()
+        document.add_step("wait")
+        document.add_step("wait")
+
+        inserted = document.insert_step("mouse_click", 1)
+
+        self.assertEqual(inserted, 1)
+        self.assertEqual(
+            [step["type"] for step in document.steps],
+            ["wait", "mouse_click", "wait"],
+        )
+        ids = [step["id"] for step in document.steps]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertTrue(document.dirty)
+
+    def test_insert_step_clamps_out_of_range_position(self) -> None:
+        document = WorkflowDocument()
+        document.add_step("wait")
+
+        self.assertEqual(document.insert_step("wait", 99), 1)
+        self.assertEqual(document.insert_step("wait", -5), 0)
+        self.assertEqual(document.steps[0]["id"], "wait-3")
+
     def test_duplicate_step_id_is_rejected(self) -> None:
         document = WorkflowDocument()
         first = document.add_step("wait")
@@ -110,6 +134,32 @@ class WorkflowDocumentTests(unittest.TestCase):
 
             self.assertEqual(loaded.steps[0]["type"], "wait")
             self.assertFalse(loaded.dirty)
+
+    def test_auto_delay_setting_round_trips_through_save(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "workflow.json"
+            document = WorkflowDocument()
+            document.add_step("wait")
+
+            self.assertEqual(document.auto_delay["mode"], "none")
+            document.set_auto_delay("random", fixed_ms=500, min_ms=100, max_ms=200)
+
+            self.assertTrue(document.dirty)
+            saved = document.save(path, root)
+            raw = json.loads(saved.read_text(encoding="utf-8"))
+            self.assertEqual(raw["settings"]["auto_delay"]["mode"], "random")
+            self.assertEqual(raw["settings"]["auto_delay"]["min_ms"], 100)
+
+            definition = load_workflow_v2(saved, root)
+            self.assertEqual(definition.settings.auto_delay.mode, "random")
+            self.assertEqual(definition.settings.auto_delay.max_ms, 200)
+
+    def test_auto_delay_rejects_min_above_max(self) -> None:
+        document = WorkflowDocument()
+
+        with self.assertRaises(ValueError):
+            document.set_auto_delay("random", fixed_ms=500, min_ms=900, max_ms=100)
 
     def test_failed_save_leaves_no_temp_files_behind(self) -> None:
         with TemporaryDirectory() as directory:

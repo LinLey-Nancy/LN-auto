@@ -106,7 +106,9 @@ def run_template_action(
     except TemplateMatchDiagnosticError as error:
         raise TemplateActionError(str(error)) from error
     if not recognition.hit or recognition.box is None:
-        raise TemplateNotFoundError("Template was not found; no input was sent.")
+        raise TemplateNotFoundError(
+            "未找到模板，未发送输入。请确认目标画面已显示，或重新截取模板、降低识别阈值。"
+        )
 
     click_count = action_click_count(action)
     point = box_center(recognition.box)

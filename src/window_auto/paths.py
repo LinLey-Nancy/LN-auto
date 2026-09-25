@@ -16,3 +16,20 @@ def project_root() -> Path:
     if frozen_root is not None:
         return Path(frozen_root)
     return Path(__file__).resolve().parents[2]
+
+
+def workflow_dir() -> Path:
+    """Return the default directory for user workflow files, creating it.
+
+    In a PyInstaller onedir bundle this is a ``workflow/`` folder next to the
+    executable (a sibling of the ``_internal`` data directory); in a source
+    checkout it is ``workflow/`` at the repository root.
+    """
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root is not None:
+        base = Path(sys.executable).resolve().parent
+    else:
+        base = Path(__file__).resolve().parents[2]
+    directory = base / "workflow"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory

@@ -34,7 +34,7 @@ from window_auto.diagnostics.workspace import create_debug_workspace, configure_
 from window_auto.runtime.maa_runtime import get_maa_version
 from window_auto.runtime.task_runtime import TaskRuntimeError, run_task
 from window_auto.runtime.win32_controller import ControllerConnectionError
-from window_auto.paths import project_root
+from window_auto.paths import project_root, workflow_dir
 from window_auto.windowing.selector import (
     WindowSelectionError,
     choose_window_by_index,
@@ -49,11 +49,22 @@ from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
 
 
 PROJECT_ROOT = project_root()
+WORKFLOW_DIRECTORY = workflow_dir()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "default.json"
 
 
 class CliConfigError(RuntimeError):
     """Raised when the main configuration cannot be loaded or validated."""
+
+
+def resolve_workflow_path(path: Path) -> Path:
+    """Resolve a workflow path, preferring the user workflow directory."""
+    if path.is_absolute():
+        return path
+    candidate = WORKFLOW_DIRECTORY / path
+    if candidate.is_file():
+        return candidate
+    return PROJECT_ROOT / path
 
 
 def _load_cli_config(config_path: Path) -> dict:
@@ -759,9 +770,7 @@ def run_workflow_program(args) -> int:
     workspace = create_debug_workspace(PROJECT_ROOT, config["diagnostics"]["debug_dir"])
     log_path = configure_file_logging(workspace)
     logger = logging.getLogger(__name__)
-    workflow_path = args.workflow
-    if not workflow_path.is_absolute():
-        workflow_path = PROJECT_ROOT / workflow_path
+    workflow_path = resolve_workflow_path(args.workflow)
     try:
         definition = load_workflow(workflow_path.resolve(), PROJECT_ROOT)
     except WorkflowConfigError as error:
@@ -845,9 +854,7 @@ def run_workflow_v2_program(args) -> int:
     workspace = create_debug_workspace(PROJECT_ROOT, config["diagnostics"]["debug_dir"])
     log_path = configure_file_logging(workspace)
     logger = logging.getLogger(__name__)
-    workflow_path = args.workflow
-    if not workflow_path.is_absolute():
-        workflow_path = PROJECT_ROOT / workflow_path
+    workflow_path = resolve_workflow_path(args.workflow)
     try:
         definition = load_workflow_v2(workflow_path.resolve(), PROJECT_ROOT)
     except WorkflowV2ConfigError as error:

@@ -14,6 +14,7 @@ class WorkflowEventType(StrEnum):
     STEP_SUCCEEDED = "step_succeeded"
     STEP_FAILED = "step_failed"
     STEP_SKIPPED = "step_skipped"
+    AUTO_DELAY = "auto_delay"
     WORKFLOW_CANCELLED = "workflow_cancelled"
     WORKFLOW_FAILED = "workflow_failed"
     WORKFLOW_SUCCEEDED = "workflow_succeeded"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from random import randint
+import random
 
 from window_auto.automation.template_action import box_center, load_template_image
 from window_auto.diagnostics.screenshot import capture_image
@@ -29,6 +29,11 @@ from window_auto.workflow.model import (
 from window_auto.workflow.virtual_keys import resolve_text_character, resolve_virtual_key
 
 
+# SystemRandom draws from the OS entropy source, so random wait durations
+# cannot be predicted or reproduced from a seeded pseudo-random sequence.
+_WAIT_RANDOM = random.SystemRandom()
+
+
 class WorkflowActionError(RuntimeError):
     """Raised when one workflow action fails."""
 
@@ -45,7 +50,10 @@ class ActionResult:
 def _successful(job, description: str) -> None:
     completed = job.wait()
     if not completed.succeeded:
-        raise WorkflowActionError(f"MaaFramework action failed: {description}.")
+        raise WorkflowActionError(
+            f"MaaFramework 操作失败：{description}。"
+            "请确认目标窗口仍在前台且未最小化，必要时更换输入策略后重试。"
+        )
 
 
 def _click(
@@ -60,7 +68,7 @@ def _click(
         window = context.session.window
         if window is None:
             raise WorkflowActionError(
-                "Precise foreground input requires the selected target window."
+                "前台精确输入需要先选择目标窗口，请先点击“选择窗口”。"
             )
         try:
             click_client_point(window, point, button)
@@ -78,7 +86,8 @@ def _match_point(context: ExecutionContext, variable: str) -> tuple[int, int]:
     value = context.variables.get(variable)
     if not isinstance(value, MatchBox):
         raise WorkflowActionError(
-            f"Match variable {variable!r} is missing or does not contain a match box."
+            f"识别结果变量 {variable!r} 不存在或不是有效的识别框。"
+            f"请先添加并成功执行结果变量为 {variable!r} 的模板识别步骤。"
         )
     return box_center(value)
 
@@ -117,7 +126,8 @@ def _controller_box(
         or controller_input_size[1] <= 0
     ):
         raise WorkflowActionError(
-            f"Invalid controller input size: {controller_input_size!r}."
+            f"控制器输入分辨率无效：{controller_input_size!r}。"
+            "请重新选择目标窗口后重试。"
         )
     if frame is None:
         try:
@@ -137,7 +147,7 @@ def _controller_box(
         or window.client_height is None
     ):
         raise WorkflowActionError(
-            "Desktop capture scope requires the target window client origin and size."
+            "桌面截图范围需要目标窗口的客户区位置和尺寸，请重新选择目标窗口后重试。"
         )
     try:
         return desktop_box_to_controller(
@@ -157,7 +167,7 @@ def _run_template_match(
 ) -> ActionResult:
     if step.attempts < 1:
         raise WorkflowActionError(
-            f"Template match attempts must be at least 1, got {step.attempts}."
+            f"模板识别次数至少为 1，当前为 {step.attempts}。请在步骤属性中修正。"
         )
     runtime = context.session.initialize_runtime()
     template = load_template_image(step.template_path)
@@ -202,11 +212,13 @@ def _run_template_match(
     if recognition.candidate_score is not None and recognition.candidate_box is not None:
         box = recognition.candidate_box
         candidate_detail = (
-            f" Best candidate score {recognition.candidate_score:.3f} at "
-            f"[{box.x},{box.y},{box.w},{box.h}] is below threshold {step.threshold:.3f}."
+            f"最接近的候选得分 {recognition.candidate_score:.3f}"
+            f"（位置 [{box.x},{box.y},{box.w},{box.h}]），"
+            f"低于识别阈值 {step.threshold:.3f}，可适当降低阈值或重新截取模板。"
         )
     raise TemplateNotFoundError(
-        f"Template was not found after {step.attempts} attempt(s): {step.template_path}."
+        f"识别 {step.attempts} 次后仍未找到模板：{step.template_path}。"
+        "请确认目标画面已显示。"
         f"{candidate_detail}"
     )
 
@@ -330,7 +342,7 @@ def execute_action(step: WorkflowStep, context: ExecutionContext) -> ActionResul
 
     if isinstance(step, WaitStep):
         duration_ms = (
-            randint(step.min_duration_ms, step.max_duration_ms)
+            _WAIT_RANDOM.randint(step.min_duration_ms, step.max_duration_ms)
             if step.delay_mode == "random"
             else step.duration_ms
         )
@@ -370,7 +382,9 @@ def execute_action(step: WorkflowStep, context: ExecutionContext) -> ActionResul
             else (step.x, step.y)
         )
         if point[0] is None or point[1] is None:
-            raise WorkflowActionError("Mouse click point is incomplete.")
+            raise WorkflowActionError(
+                "鼠标点击步骤缺少坐标或识别结果变量，请在步骤属性中补全后再运行。"
+            )
         for click_index in range(step.count):
             _click(
                 context,
@@ -387,4 +401,4 @@ def execute_action(step: WorkflowStep, context: ExecutionContext) -> ActionResul
         return _run_text_input(step, context)
     if isinstance(step, TemplateMatchStep):
         return _run_template_match(step, context)
-    raise WorkflowActionError(f"Unsupported workflow step: {type(step).__name__}.")
+    raise WorkflowActionError(f"不支持的步骤类型：{type(step).__name__}。")
