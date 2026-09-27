@@ -7,7 +7,15 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QMessageBox, QPushButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+)
 
 from window_auto.gui.app import create_application
 from window_auto.gui.document import WorkflowDocument
@@ -44,7 +52,7 @@ class GuiSmokeTests(unittest.TestCase):
     def test_main_window_builds_and_adds_a_step(self) -> None:
         window = MainWindow()
 
-        self.assertEqual(window.palette.count(), 7)
+        self.assertEqual(window.palette.count(), 8)
         self.assertFalse(window.stop_button.isEnabled())
         self.assertTrue(window.run_button.isEnabled())
         window.palette.setCurrentRow(5)
@@ -251,6 +259,43 @@ class GuiSmokeTests(unittest.TestCase):
         window.document.dirty = False
         window.close()
 
+    def test_ocr_step_has_retry_option_and_expected_text_field(self) -> None:
+        window = MainWindow()
+        window.palette.setCurrentRow(7)
+        window.add_selected_action()
+
+        self.assertEqual(window.document.steps[0]["type"], "ocr_match")
+        retry_combo = next(
+            control
+            for control in window.properties.findChildren(QComboBox)
+            if control.accessibleName() == "失败时"
+        )
+        retry_values = [
+            retry_combo.itemData(index)
+            for index in range(retry_combo.count())
+        ]
+        self.assertIn("retry", retry_values)
+        labels = {label.text() for label in window.properties.findChildren(QLabel)}
+        self.assertIn("期望文本：", labels)
+        self.assertIn("识别后操作：", labels)
+
+        post_action_combo = next(
+            control
+            for control in window.properties.findChildren(QComboBox)
+            if control.accessibleName() == "识别后操作"
+        )
+        post_action_combo.setCurrentIndex(post_action_combo.findData("double_click"))
+        QApplication.processEvents()
+        visible_labels = {
+            label.text()
+            for label in window.properties.findChildren(QLabel)
+        }
+        self.assertIn("操作鼠标按键：", visible_labels)
+        self.assertIn("双击间隔（毫秒）：", visible_labels)
+
+        window.document.dirty = False
+        window.close()
+
     def test_help_menu_offers_update_actions(self) -> None:
         with TemporaryDirectory() as directory:
             settings_path = str(Path(directory) / "settings.ini")
@@ -325,17 +370,85 @@ class GuiSmokeTests(unittest.TestCase):
         )
         self.assertEqual(
             summarize_step({"type": "key_press", "key": "S", "modifiers": ["CTRL"]}),
-            "按键 CTRL+S",
+            "按键 Ctrl+S",
         )
         self.assertEqual(
             summarize_step({"type": "run_workflow", "workflow": "child.json"}),
             "子工作流 child.json",
+        )
+        self.assertEqual(
+            summarize_step(
+                {
+                    "type": "ocr_match",
+                    "expected": ["确定"],
+                    "threshold": 0.3,
+                    "post_action": "click",
+                }
+            ),
+            "识别文字“确定” · 阈值 0.3 · 识别后单击",
         )
         sensitive = summarize_step(
             {"type": "text_input", "text": "secret", "sensitive": True}
         )
         self.assertIn("敏感内容", sensitive)
         self.assertNotIn("secret", sensitive)
+
+    def test_key_picker_dialog_offers_full_keyboard_layout(self) -> None:
+        from window_auto.gui.key_picker import KeyPickerDialog
+
+        dialog = KeyPickerDialog("ENTER")
+        buttons = dialog.findChildren(QPushButton)
+        self.assertGreaterEqual(len(buttons), 100)
+
+        button_a = next(button for button in buttons if button.text() == "A")
+        button_a.click()
+
+        self.assertEqual(dialog.selected_value(), "A")
+        self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
+        dialog.close()
+
+    def test_key_display_label_covers_names_codes_and_fallback(self) -> None:
+        from window_auto.gui.key_picker import key_display_label
+
+        self.assertEqual(key_display_label("ENTER"), "Enter")
+        self.assertEqual(key_display_label("S"), "S")
+        self.assertEqual(key_display_label(20), "Caps")
+        self.assertEqual(key_display_label(99), "Num 3")
+        self.assertEqual(key_display_label(200), "200")
+
+    def test_key_press_step_uses_readonly_field_with_picker_button(self) -> None:
+        window = MainWindow()
+        window.palette.setCurrentRow(3)
+        window.add_selected_action()
+
+        editor = window.properties.findChild(QLineEdit, "keyValueEdit")
+        self.assertIsNotNone(editor)
+        self.assertTrue(editor.isReadOnly())
+        self.assertEqual(editor.text(), "Enter")
+        self.assertIsNotNone(
+            window.properties.findChild(QPushButton, "selectKeyButton")
+        )
+        window.document.dirty = False
+        window.close()
+
+    def test_key_picker_selection_updates_step_value(self) -> None:
+        from window_auto.gui.key_picker import KeyPickerDialog
+
+        window = MainWindow()
+        window.palette.setCurrentRow(3)
+        window.add_selected_action()
+        button = window.properties.findChild(QPushButton, "selectKeyButton")
+
+        with patch.object(
+            KeyPickerDialog, "exec", return_value=QDialog.DialogCode.Accepted
+        ), patch.object(KeyPickerDialog, "selected_value", return_value="F5"):
+            button.click()
+
+        self.assertEqual(window.document.steps[0]["key"], "F5")
+        editor = window.properties.findChild(QLineEdit, "keyValueEdit")
+        self.assertEqual(editor.text(), "F5")
+        window.document.dirty = False
+        window.close()
 
     def test_numeric_virtual_key_codes_parse_to_integers(self) -> None:
         self.assertEqual(PropertyEditor._parse_text("65", "ENTER", "key"), 65)

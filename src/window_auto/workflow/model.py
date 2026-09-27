@@ -106,6 +106,22 @@ class TemplateMatchStep(StepBase):
 
 
 @dataclass(frozen=True, slots=True)
+class OcrMatchStep(StepBase):
+    expected: tuple[str, ...] = ()
+    threshold: float = 0.3
+    attempts: int = 1
+    interval_ms: int = 500
+    result_variable: str = ""
+    post_action: Literal["none", "click", "double_click", "key_press"] = "none"
+    post_button: Literal["left", "right", "middle"] = "left"
+    post_action_interval_ms: int = 100
+    post_key: str | int = "ENTER"
+    post_modifiers: tuple[str | int, ...] = ()
+    post_key_hold_ms: int = 50
+    kind: Literal["ocr_match"] = field(default="ocr_match", init=False)
+
+
+@dataclass(frozen=True, slots=True)
 class RunWorkflowStep(StepBase):
     workflow_path: Path = Path()
     kind: Literal["run_workflow"] = field(default="run_workflow", init=False)
@@ -118,6 +134,7 @@ WorkflowStep: TypeAlias = (
     | KeyPressStep
     | TextInputStep
     | TemplateMatchStep
+    | OcrMatchStep
     | RunWorkflowStep
 )
 

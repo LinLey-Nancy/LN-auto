@@ -1,6 +1,6 @@
 # LN-auto 项目状态与路线图
 
-更新时间：2026-09-26
+更新时间：2026-09-27
 
 ## 项目目标
 
@@ -13,6 +13,10 @@ LN-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终�
 - 工作流保存、加载、调试与发布
 
 项目以“输入发送成功不等于目标应用已经处理输入”为安全原则。正式流程应通过模板、截图变化或其他可观测状态验证操作结果。
+
+## 2026-09-27 更新内容
+
+- 新增工作流动作类型 `ocr_match`（GUI 显示名「OCR识别」）：通过 MaaFramework 的 OCR 识别（PP-OCRv4 中文模型，`assets/resource/model/ocr/`）按期望文字定位画面元素，作为模板识别的补充——模板匹配对字体/背景轻微差异敏感，OCR 直接按按钮文字查找。`expected` 为期望文字数组（识别到任意一个即算成功），`threshold` 默认 0.3；支持 `attempts`/`interval_ms` 轮询、结果变量写入和识别后单击/双击/按键（与模板识别同一套 post_action 字段），`on_failure: "retry"` 持续识别策略与模板识别一致（失败异常复用 `TemplateNotFoundError`，引擎重试逻辑直接生效），步骤超时预算同样按识别次数×间隔豁免。新增底层 `diagnostics/ocr_match.py`（`recognize_ocr` 返回 hit/score/box/text），GUI 组件面板、属性编辑（期望文本逗号分隔编辑、post_* 条件显隐）和步骤列表摘要均已接入；`config/workflow.v2.example.json` 追加 OCR 示例步骤。安装包无需改动：`assets/` 目录整体打包，OCR 模型随资源包自动加载。
 
 ## 2026-09-26 更新内容
 
@@ -105,6 +109,7 @@ src/window_auto/
 - 新增严格的工作流 v2 JSON 模型和未知字段拒绝机制。
 - 已支持以下步骤：
   - `template_match`
+  - `ocr_match`
   - `mouse_move`
   - `mouse_click`
   - `key_press`

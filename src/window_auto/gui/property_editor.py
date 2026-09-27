@@ -8,6 +8,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
@@ -20,6 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from window_auto.gui.key_picker import KeyPickerDialog, key_display_label
+
 
 FIELD_LABELS = {
     "id": "步骤 ID",
@@ -28,6 +31,7 @@ FIELD_LABELS = {
     "enabled": "启用",
     "on_failure": "失败时",
     "template": "模板路径",
+    "expected": "期望文本",
     "threshold": "识别阈值",
     "attempts": "识别次数",
     "result_variable": "结果变量",
@@ -69,16 +73,20 @@ FIELD_HELP = {
     "enabled": "关闭后运行工作流时会跳过这个步骤，但仍保留其配置。",
     "on_failure": (
         "步骤执行失败后的处理方式。“停止工作流”会立即结束；"
-        "“继续下一步”会忽略本次失败；模板识别还可选择“再次运行”，"
+        "“继续下一步”会忽略本次失败；模板识别和OCR识别还可选择“再次运行”，"
         "持续重新识别，直到成功或用户停止工作流。"
     ),
     "template": (
         "用于画面匹配的 PNG/JPG 图片路径。建议使用右侧按钮选择已有图片，"
         "或从截图框选创建模板。项目内路径会保存为相对路径。"
     ),
+    "expected": (
+        "要在画面中查找的文字，多个用英文逗号分隔，识别到任意一个即算成功。"
+        "OCR 对字体和背景的轻微差异不如模板匹配敏感，适合按按钮文字定位。"
+    ),
     "threshold": (
-        "模板识别的最低相似度，范围为 0～1。数值越高越严格；"
-        "0.8 表示相似度达到 80% 才算识别成功。"
+        "识别的最低相似度，范围为 0～1。数值越高越严格；"
+        "模板识别常用 0.8，OCR 识别常用 0.3。"
     ),
     "attempts": (
         "每次运行该步骤时最多连续识别的次数。每次失败会等待“间隔”后重试；"
@@ -94,7 +102,10 @@ FIELD_HELP = {
     ),
     "post_button": "识别成功后点击匹配区域中心时使用的鼠标按键。",
     "post_action_interval_ms": "识别成功后执行双击时，两次点击之间的等待时间。",
-    "post_key": "模板识别成功后要发送的键名或 Windows 虚拟键码。",
+    "post_key": (
+        "模板识别成功后要发送的按键。点击右侧“选择按键”按钮，"
+        "在弹出的键盘布局窗口中点选，避免输错键名。"
+    ),
     "post_modifiers": "识别后按键使用的组合键，多个按键用英文逗号分隔。",
     "post_key_hold_ms": "识别后按键从按下到抬起之间保持的时间。",
     "move_mode": (
@@ -108,7 +119,10 @@ FIELD_HELP = {
     "match_variable": "读取模板识别步骤保存的结果变量，并使用匹配区域中心作为位置。",
     "button": "要发送的鼠标按键。",
     "count": "点击次数；1 为单击，2 为双击。",
-    "key": "要发送的键名或 Windows 虚拟键码，例如 ENTER、F1 或 65。",
+    "key": (
+        "要发送的按键。点击右侧“选择按键”按钮，"
+        "在弹出的键盘布局窗口中点选，避免输错键名。"
+    ),
     "modifiers": "组合键列表，多个按键用英文逗号分隔，例如 CTRL, SHIFT。",
     "hold_ms": "键盘按键从按下到抬起之间保持的时间，单位为毫秒。",
     "text": "需要输入到目标窗口的文本内容。",
@@ -213,7 +227,7 @@ class PropertyEditor(QWidget):
                 return move_mode == "absolute"
             if key in {"delta_x", "delta_y"}:
                 return move_mode == "relative"
-        if step_type == "template_match":
+        if step_type in {"template_match", "ocr_match"}:
             post_action = step.get("post_action", "none")
             if key == "post_button":
                 return post_action in {"click", "double_click"}
@@ -233,10 +247,12 @@ class PropertyEditor(QWidget):
             widget = self._template_path_widget(value)
         elif key == "workflow" and self._step_type == "run_workflow":
             widget = self._workflow_path_widget(value)
+        elif key in self._KEY_FIELDS:
+            widget = self._key_field_widget(key, value)
         elif key in CHOICES:
             widget = QComboBox()
             choices = CHOICES[key]
-            if key == "on_failure" and self._step_type == "template_match":
+            if key == "on_failure" and self._step_type in {"template_match", "ocr_match"}:
                 choices = (
                     ("停止工作流", "stop"),
                     ("再次运行（直到成功）", "retry"),
@@ -353,6 +369,38 @@ class PropertyEditor(QWidget):
         layout.addWidget(editor, 1)
         layout.addWidget(select_button)
         host.setAccessibleName("子工作流文件")
+        return host
+
+    def _key_field_widget(self, field: str, value: Any) -> QWidget:
+        host = QWidget()
+        layout = QHBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        state = {"value": value}
+        editor = QLineEdit(key_display_label(value))
+        editor.setObjectName("keyValueEdit")
+        editor.setReadOnly(True)
+        select_button = QPushButton("选择按键…")
+        select_button.setObjectName("selectKeyButton")
+        select_button.setToolTip("打开键盘布局窗口，点击要发送的按键。")
+
+        def pick_key() -> None:
+            dialog = KeyPickerDialog(state["value"], self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            picked = dialog.selected_value()
+            if picked is None:
+                return
+            state["value"] = picked
+            editor.setText(key_display_label(picked))
+            self._emit(field, picked)
+
+        select_button.clicked.connect(pick_key)
+
+        layout.addWidget(editor, 1)
+        layout.addWidget(select_button)
+        host.setAccessibleName(FIELD_LABELS.get(field, field))
         return host
 
     @staticmethod

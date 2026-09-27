@@ -24,6 +24,7 @@ from window_auto.workflow.model import (
     AutoDelay,
     KeyPressStep,
     MouseClickStep,
+    OcrMatchStep,
     RunWorkflowStep,
     TemplateMatchStep,
     TextInputStep,
@@ -319,7 +320,7 @@ class WorkflowEngine:
 
 def _intrinsic_wait_budget_ms(step) -> int:
     """Return the time one step deliberately spends waiting by configuration."""
-    if isinstance(step, TemplateMatchStep):
+    if isinstance(step, (TemplateMatchStep, OcrMatchStep)):
         return step.attempts * step.interval_ms + step.post_action_interval_ms
     if isinstance(step, KeyPressStep):
         return step.hold_ms

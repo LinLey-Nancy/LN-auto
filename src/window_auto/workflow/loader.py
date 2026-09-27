@@ -13,6 +13,7 @@ from window_auto.workflow.model import (
     KeyPressStep,
     MouseClickStep,
     MouseMoveStep,
+    OcrMatchStep,
     RunWorkflowStep,
     TemplateMatchStep,
     TextInputStep,
@@ -43,6 +44,19 @@ _TYPE_FIELDS = {
     "text_input": {"text", "strategy", "interval_ms", "sensitive"},
     "template_match": {
         "template",
+        "threshold",
+        "attempts",
+        "interval_ms",
+        "result_variable",
+        "post_action",
+        "post_button",
+        "post_action_interval_ms",
+        "post_key",
+        "post_modifiers",
+        "post_key_hold_ms",
+    },
+    "ocr_match": {
+        "expected",
         "threshold",
         "attempts",
         "interval_ms",
@@ -134,6 +148,51 @@ def _modifiers(
     return tuple(values)
 
 
+def _threshold(data: dict[str, Any], context: str, *, default: float) -> float:
+    threshold = data.get("threshold", default)
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+        raise WorkflowV2ConfigError(f"{context}.threshold must be a number.")
+    threshold = float(threshold)
+    if not 0.0 < threshold <= 1.0:
+        raise WorkflowV2ConfigError(f"{context}.threshold must be greater than 0 and at most 1.")
+    return threshold
+
+
+def _post_action_fields(data: dict[str, Any], context: str) -> dict[str, Any]:
+    post_action = data.get("post_action", "none")
+    if post_action not in {"none", "click", "double_click", "key_press"}:
+        raise WorkflowV2ConfigError(
+            f"{context}.post_action must be 'none', 'click', 'double_click', or 'key_press'."
+        )
+    post_button = data.get("post_button", "left")
+    if post_button not in {"left", "right", "middle"}:
+        raise WorkflowV2ConfigError(
+            f"{context}.post_button must be 'left', 'right', or 'middle'."
+        )
+    return {
+        "post_action": post_action,
+        "post_button": post_button,
+        "post_action_interval_ms": _integer(
+            data,
+            "post_action_interval_ms",
+            context,
+            default=100,
+            minimum=0,
+            maximum=MAX_TIME_MS,
+        ),
+        "post_key": _key_value(data, "post_key", context, default="ENTER"),
+        "post_modifiers": _modifiers(data, "post_modifiers", context),
+        "post_key_hold_ms": _integer(
+            data,
+            "post_key_hold_ms",
+            context,
+            default=50,
+            minimum=0,
+            maximum=MAX_TIME_MS,
+        ),
+    }
+
+
 def resolve_workflow_reference(
     raw: str,
     project_root: Path,
@@ -191,7 +250,7 @@ def _load_step(
     if step_type not in _TYPE_FIELDS:
         raise WorkflowV2ConfigError(f"{context}.type is unsupported: {step_type!r}.")
     _reject_unknown(data, _BASE_FIELDS | _TYPE_FIELDS[step_type], context)
-    base = _base(data, context, allow_retry=step_type == "template_match")
+    base = _base(data, context, allow_retry=step_type in {"template_match", "ocr_match"})
 
     if step_type == "wait":
         delay_mode = data.get("delay_mode", "fixed")
@@ -334,57 +393,47 @@ def _load_step(
             )
         return RunWorkflowStep(**base, workflow_path=workflow_path)
 
+    if step_type == "ocr_match":
+        raw_expected = data.get("expected")
+        if (
+            not isinstance(raw_expected, list)
+            or not raw_expected
+            or any(
+                not isinstance(item, str) or not item.strip()
+                for item in raw_expected
+            )
+        ):
+            raise WorkflowV2ConfigError(
+                f"{context}.expected must be a non-empty array of non-empty strings."
+            )
+        return OcrMatchStep(
+            **base,
+            expected=tuple(item.strip() for item in raw_expected),
+            threshold=_threshold(data, context, default=0.3),
+            attempts=_integer(data, "attempts", context, default=1, minimum=1, maximum=100),
+            interval_ms=_integer(
+                data, "interval_ms", context, default=500, minimum=0, maximum=MAX_TIME_MS
+            ),
+            result_variable=_string(data, "result_variable", context),
+            **_post_action_fields(data, context),
+        )
+
     template = Path(_string(data, "template", context))
     if not template.is_absolute():
         template = project_root / template
     template = template.resolve()
     if not template.is_file():
         raise WorkflowV2ConfigError(f"{context}.template does not exist: {template}")
-    threshold = data.get("threshold", 0.8)
-    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
-        raise WorkflowV2ConfigError(f"{context}.threshold must be a number.")
-    threshold = float(threshold)
-    if not 0.0 < threshold <= 1.0:
-        raise WorkflowV2ConfigError(f"{context}.threshold must be greater than 0 and at most 1.")
-    post_action = data.get("post_action", "none")
-    if post_action not in {"none", "click", "double_click", "key_press"}:
-        raise WorkflowV2ConfigError(
-            f"{context}.post_action must be 'none', 'click', 'double_click', or 'key_press'."
-        )
-    post_button = data.get("post_button", "left")
-    if post_button not in {"left", "right", "middle"}:
-        raise WorkflowV2ConfigError(
-            f"{context}.post_button must be 'left', 'right', or 'middle'."
-        )
     return TemplateMatchStep(
         **base,
         template_path=template,
-        threshold=threshold,
+        threshold=_threshold(data, context, default=0.8),
         attempts=_integer(data, "attempts", context, default=1, minimum=1, maximum=100),
         interval_ms=_integer(
             data, "interval_ms", context, default=500, minimum=0, maximum=MAX_TIME_MS
         ),
         result_variable=_string(data, "result_variable", context),
-        post_action=post_action,
-        post_button=post_button,
-        post_action_interval_ms=_integer(
-            data,
-            "post_action_interval_ms",
-            context,
-            default=100,
-            minimum=0,
-            maximum=MAX_TIME_MS,
-        ),
-        post_key=_key_value(data, "post_key", context, default="ENTER"),
-        post_modifiers=_modifiers(data, "post_modifiers", context),
-        post_key_hold_ms=_integer(
-            data,
-            "post_key_hold_ms",
-            context,
-            default=50,
-            minimum=0,
-            maximum=MAX_TIME_MS,
-        ),
+        **_post_action_fields(data, context),
     )
 
 

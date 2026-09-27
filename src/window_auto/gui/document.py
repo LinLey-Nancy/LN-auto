@@ -65,6 +65,19 @@ STEP_DEFAULTS: dict[str, dict[str, Any]] = {
     "run_workflow": {
         "workflow": "",
     },
+    "ocr_match": {
+        "expected": ["确定"],
+        "threshold": 0.3,
+        "attempts": 3,
+        "interval_ms": 500,
+        "result_variable": "match",
+        "post_action": "none",
+        "post_button": "left",
+        "post_action_interval_ms": 100,
+        "post_key": "ENTER",
+        "post_modifiers": [],
+        "post_key_hold_ms": 50,
+    },
 }
 
 STEP_LABELS = {
@@ -75,6 +88,7 @@ STEP_LABELS = {
     "text_input": "文本输入",
     "wait": "延迟",
     "run_workflow": "执行工作流",
+    "ocr_match": "OCR识别",
 }
 
 AUTO_DELAY_DEFAULTS: dict[str, Any] = {

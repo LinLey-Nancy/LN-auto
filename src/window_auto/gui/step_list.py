@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from window_auto.gui.document import STEP_LABELS
+from window_auto.gui.key_picker import key_display_label
 
 
 TYPE_COLORS = {
@@ -20,6 +21,7 @@ TYPE_COLORS = {
     "text_input": "#EA580C",
     "wait": "#64748B",
     "run_workflow": "#DB2777",
+    "ocr_match": "#0891B2",
 }
 TYPE_TAGS = {
     "template_match": "模板",
@@ -29,6 +31,7 @@ TYPE_TAGS = {
     "text_input": "文本",
     "wait": "延迟",
     "run_workflow": "流程",
+    "ocr_match": "OCR",
 }
 _BUTTON_LABELS = {"left": "左键", "right": "右键", "middle": "中键"}
 _POST_ACTION_LABELS = {
@@ -64,9 +67,10 @@ def summarize_step(step: dict[str, Any]) -> str:
         return f"{button}{verb} {target}"
     if step_type == "key_press":
         modifiers = step.get("modifiers") or []
-        prefix = "+".join(str(item) for item in modifiers)
-        key = f"{prefix}+{step.get('key', '')}" if prefix else str(step.get("key", ""))
-        return f"按键 {key}"
+        prefix = "+".join(key_display_label(item) for item in modifiers)
+        key = key_display_label(step.get("key", ""))
+        combo = f"{prefix}+{key}" if prefix else key
+        return f"按键 {combo}"
     if step_type == "text_input":
         text = str(step.get("text", ""))
         if step.get("sensitive"):
@@ -76,6 +80,14 @@ def summarize_step(step: dict[str, Any]) -> str:
     if step_type == "template_match":
         name = Path(str(step.get("template", ""))).name or "未设置"
         summary = f"模板 {name} · 阈值 {step.get('threshold', 0.8)}"
+        post = _POST_ACTION_LABELS.get(str(step.get("post_action", "none")))
+        if post:
+            summary += f" · 识别后{post}"
+        return summary
+    if step_type == "ocr_match":
+        expected = step.get("expected") or []
+        shown = "、".join(str(item) for item in expected) or "未设置"
+        summary = f"识别文字“{shown}” · 阈值 {step.get('threshold', 0.3)}"
         post = _POST_ACTION_LABELS.get(str(step.get("post_action", "none")))
         if post:
             summary += f" · 识别后{post}"

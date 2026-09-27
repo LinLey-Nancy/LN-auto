@@ -15,6 +15,7 @@ from window_auto.diagnostics.desktop_scope import (
     scale_box_between_sizes,
 )
 from window_auto.diagnostics.template_match import MatchBox, recognize_template
+from window_auto.diagnostics.ocr_match import recognize_ocr
 from window_auto.runtime.humanize import (
     curve_points,
     humanize_from_config,
@@ -28,6 +29,7 @@ from window_auto.workflow.model import (
     KeyPressStep,
     MouseClickStep,
     MouseMoveStep,
+    OcrMatchStep,
     TemplateMatchStep,
     TextInputStep,
     WaitStep,
@@ -271,6 +273,64 @@ def _run_template_match(
     )
 
 
+def _run_ocr_match(
+    step: OcrMatchStep,
+    context: ExecutionContext,
+) -> ActionResult:
+    if step.attempts < 1:
+        raise WorkflowActionError(
+            f"OCR 识别次数至少为 1，当前为 {step.attempts}。请在步骤属性中修正。"
+        )
+    if not step.expected:
+        raise WorkflowActionError(
+            "OCR 识别缺少期望文本，请在步骤属性中填写要查找的文字。"
+        )
+    runtime = context.session.initialize_runtime()
+    for attempt in range(1, step.attempts + 1):
+        context.cancellation.check()
+        image, desktop_frame = _recognition_frame(context)
+        recognition = recognize_ocr(
+            runtime,
+            image,
+            step.expected,
+            step.threshold,
+        )
+        if recognition.hit and recognition.box is not None:
+            image_height, image_width = image.shape[:2]
+            controller_box = _controller_box(
+                recognition.box,
+                context,
+                desktop_frame,
+                (image_width, image_height),
+            )
+            context.variables[step.result_variable] = controller_box
+            point = box_center(controller_box)
+            post_action_output = _run_template_post_action(
+                step,
+                context,
+                point,
+            )
+            return ActionResult(
+                {
+                    "attempt": attempt,
+                    "score": recognition.score,
+                    "text": recognition.text,
+                    "box": recognition.box,
+                    "controller_box": controller_box,
+                    "point": point,
+                    "variable": step.result_variable,
+                    "post_action": post_action_output,
+                }
+            )
+        if attempt < step.attempts:
+            context.cancellation.wait(step.interval_ms / 1000.0)
+    expected_detail = "、".join(f"“{item}”" for item in step.expected)
+    raise TemplateNotFoundError(
+        f"OCR 识别 {step.attempts} 次后仍未找到文字：{expected_detail}。"
+        "请确认目标画面已显示，必要时可适当降低识别阈值。"
+    )
+
+
 def _press_key(
     key_value: str | int,
     modifier_values: tuple[str | int, ...],
@@ -320,7 +380,7 @@ def _run_key_press(step: KeyPressStep, context: ExecutionContext) -> ActionResul
 
 
 def _run_template_post_action(
-    step: TemplateMatchStep,
+    step: TemplateMatchStep | OcrMatchStep,
     context: ExecutionContext,
     point: tuple[int, int],
 ) -> dict[str, object]:
@@ -479,4 +539,6 @@ def execute_action(step: WorkflowStep, context: ExecutionContext) -> ActionResul
         return _run_text_input(step, context)
     if isinstance(step, TemplateMatchStep):
         return _run_template_match(step, context)
+    if isinstance(step, OcrMatchStep):
+        return _run_ocr_match(step, context)
     raise WorkflowActionError(f"不支持的步骤类型：{type(step).__name__}。")

@@ -10,6 +10,7 @@ import numpy
 from PIL import Image
 
 from window_auto.diagnostics.desktop_scope import DesktopRecognitionFrame
+from window_auto.diagnostics.ocr_match import OcrRecognitionResult
 from window_auto.diagnostics.template_match import MatchBox, TemplateRecognitionResult
 from window_auto.windowing.discovery import WindowInfo
 from window_auto.workflow.actions import (
@@ -27,6 +28,7 @@ from window_auto.workflow.model import (
     KeyPressStep,
     MouseClickStep,
     MouseMoveStep,
+    OcrMatchStep,
     RunWorkflowStep,
     TemplateMatchStep,
     TextInputStep,
@@ -325,6 +327,101 @@ class WorkflowV2LoaderTests(unittest.TestCase):
 
             with self.assertRaisesRegex(WorkflowV2ConfigError, "virtual key"):
                 load_workflow_v2(path, root)
+
+    def _write_ocr_workflow(self, root: Path, step: dict) -> Path:
+        path = root / "workflow.json"
+        path.write_text(
+            json.dumps(
+                {"version": 2, "name": "ocr", "steps": [step]},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_ocr_match_step_is_loaded(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self._write_ocr_workflow(
+                root,
+                {
+                    "id": "find",
+                    "type": "ocr_match",
+                    "name": "Find confirm",
+                    "expected": ["确定", " OK "],
+                    "threshold": 0.5,
+                    "attempts": 2,
+                    "interval_ms": 300,
+                    "result_variable": "match",
+                    "post_action": "click",
+                    "post_button": "right",
+                },
+            )
+
+            definition = load_workflow_v2(path, root)
+
+            step = definition.steps[0]
+            self.assertIsInstance(step, OcrMatchStep)
+            self.assertEqual(step.expected, ("确定", "OK"))
+            self.assertEqual(step.threshold, 0.5)
+            self.assertEqual(step.attempts, 2)
+            self.assertEqual(step.post_action, "click")
+            self.assertEqual(step.post_button, "right")
+
+    def test_ocr_match_rejects_empty_or_non_string_expected(self) -> None:
+        for expected in ([], ["确定", ""], ["确定", 1], "确定"):
+            with self.subTest(expected=expected), TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = self._write_ocr_workflow(
+                    root,
+                    {
+                        "id": "find",
+                        "type": "ocr_match",
+                        "name": "Find",
+                        "expected": expected,
+                        "result_variable": "match",
+                    },
+                )
+
+                with self.assertRaisesRegex(WorkflowV2ConfigError, "expected"):
+                    load_workflow_v2(path, root)
+
+    def test_ocr_match_rejects_unknown_fields(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self._write_ocr_workflow(
+                root,
+                {
+                    "id": "find",
+                    "type": "ocr_match",
+                    "name": "Find",
+                    "expected": ["确定"],
+                    "result_variable": "match",
+                    "template": "template.png",
+                },
+            )
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "Unknown"):
+                load_workflow_v2(path, root)
+
+    def test_ocr_match_accepts_retry_failure_policy(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self._write_ocr_workflow(
+                root,
+                {
+                    "id": "find",
+                    "type": "ocr_match",
+                    "name": "Find",
+                    "on_failure": "retry",
+                    "expected": ["确定"],
+                    "result_variable": "match",
+                },
+            )
+
+            definition = load_workflow_v2(path, root)
+
+            self.assertEqual(definition.steps[0].on_failure, "retry")
 
 
 class WorkflowV2ActionTests(unittest.TestCase):
@@ -748,6 +845,126 @@ class WorkflowV2ActionTests(unittest.TestCase):
                     ),
                     context,
                 )
+
+    def test_ocr_match_clicks_recognized_text_center(self) -> None:
+        session, context = _context()
+        recognition = OcrRecognitionResult(
+            hit=True,
+            score=0.97,
+            box=MatchBox(10, 20, 30, 40),
+            text="确定",
+        )
+        with (
+            patch(
+                "window_auto.workflow.actions.capture_image",
+                return_value=numpy.zeros((720, 1280, 3), dtype=numpy.uint8),
+            ),
+            patch(
+                "window_auto.workflow.actions.recognize_ocr",
+                return_value=recognition,
+            ) as mocked_ocr,
+        ):
+            result = execute_action(
+                OcrMatchStep(
+                    id="find",
+                    name="Find",
+                    expected=("确定",),
+                    result_variable="match",
+                    post_action="click",
+                ),
+                context,
+            )
+
+        (_, _, expected, threshold), _ = mocked_ocr.call_args
+        self.assertEqual(expected, ("确定",))
+        self.assertEqual(threshold, 0.3)
+        self.assertEqual(session.controller.calls, [("click", 38, 60, 0)])
+        self.assertEqual(context.variables["match"], MatchBox(16, 30, 45, 60))
+        self.assertEqual(result.output["text"], "确定")
+        self.assertEqual(result.output["post_action"]["action"], "click")
+
+    def test_ocr_match_result_variable_uses_raw_input_coordinates(self) -> None:
+        session, context = _context()
+        recognition = OcrRecognitionResult(
+            hit=True,
+            score=0.9,
+            box=MatchBox(10, 20, 30, 40),
+            text="确定",
+        )
+        with (
+            patch(
+                "window_auto.workflow.actions.capture_image",
+                return_value=numpy.zeros((720, 1280, 3), dtype=numpy.uint8),
+            ),
+            patch(
+                "window_auto.workflow.actions.recognize_ocr",
+                return_value=recognition,
+            ),
+        ):
+            execute_action(
+                OcrMatchStep(
+                    id="find",
+                    name="Find",
+                    expected=("确定",),
+                    result_variable="document",
+                ),
+                context,
+            )
+        result = execute_action(
+            MouseClickStep(
+                id="open",
+                name="Open",
+                match_variable="document",
+            ),
+            context,
+        )
+
+        self.assertEqual(session.controller.calls, [("click", 38, 60, 0)])
+        self.assertEqual(result.output["point"], (38, 60))
+
+    def test_ocr_match_miss_raises_template_not_found(self) -> None:
+        session, context = _context()
+        recognition = OcrRecognitionResult(hit=False, score=None, box=None)
+        with (
+            patch(
+                "window_auto.workflow.actions.capture_image",
+                return_value=numpy.zeros((720, 1280, 3), dtype=numpy.uint8),
+            ),
+            patch(
+                "window_auto.workflow.actions.recognize_ocr",
+                return_value=recognition,
+            ),
+            self.assertRaises(TemplateNotFoundError) as raised,
+        ):
+            execute_action(
+                OcrMatchStep(
+                    id="find",
+                    name="Find",
+                    expected=("确定", "取消"),
+                    attempts=2,
+                    interval_ms=0,
+                    result_variable="match",
+                ),
+                context,
+            )
+
+        message = str(raised.exception)
+        self.assertIn("OCR 识别 2 次", message)
+        self.assertIn("“确定”", message)
+        self.assertIn("“取消”", message)
+
+    def test_ocr_match_empty_expected_raises_action_error(self) -> None:
+        session, context = _context()
+        with self.assertRaisesRegex(WorkflowActionError, "期望文本"):
+            execute_action(
+                OcrMatchStep(
+                    id="find",
+                    name="Find",
+                    expected=(),
+                    result_variable="match",
+                ),
+                context,
+            )
 
 
 class HumanizeActionTests(unittest.TestCase):
