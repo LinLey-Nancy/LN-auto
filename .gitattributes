@@ -1,0 +1,2 @@
+# OCR 模型与词表按原样保留，不做换行符转换
+assets/resource/model/** -text
