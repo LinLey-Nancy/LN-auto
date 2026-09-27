@@ -7,11 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from window_auto.config.loader import MAX_TIME_MS
+from window_auto.paths import workflow_dir
 from window_auto.workflow.model import (
     AutoDelay,
     KeyPressStep,
     MouseClickStep,
     MouseMoveStep,
+    RunWorkflowStep,
     TemplateMatchStep,
     TextInputStep,
     WaitStep,
@@ -52,6 +54,7 @@ _TYPE_FIELDS = {
         "post_modifiers",
         "post_key_hold_ms",
     },
+    "run_workflow": {"workflow"},
 }
 
 
@@ -131,6 +134,29 @@ def _modifiers(
     return tuple(values)
 
 
+def resolve_workflow_reference(
+    raw: str,
+    project_root: Path,
+    base_dir: Path | None = None,
+) -> Path:
+    """Resolve a run_workflow reference.
+
+    Relative paths are looked up next to the referencing workflow file first,
+    then in workflow_dir(), and finally relative to project_root.
+    """
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    if base_dir is not None:
+        sibling = (base_dir / candidate).resolve()
+        if sibling.is_file():
+            return sibling
+    preferred = (workflow_dir() / candidate).resolve()
+    if preferred.is_file():
+        return preferred
+    return (project_root / candidate).resolve()
+
+
 def _base(
     data: dict[str, Any],
     context: str,
@@ -155,7 +181,12 @@ def _base(
     }
 
 
-def _load_step(data: dict[str, Any], context: str, project_root: Path) -> WorkflowStep:
+def _load_step(
+    data: dict[str, Any],
+    context: str,
+    project_root: Path,
+    base_dir: Path | None = None,
+) -> WorkflowStep:
     step_type = _string(data, "type", context)
     if step_type not in _TYPE_FIELDS:
         raise WorkflowV2ConfigError(f"{context}.type is unsupported: {step_type!r}.")
@@ -293,6 +324,16 @@ def _load_step(data: dict[str, Any], context: str, project_root: Path) -> Workfl
             sensitive=sensitive,
         )
 
+    if step_type == "run_workflow":
+        workflow_path = resolve_workflow_reference(
+            _string(data, "workflow", context), project_root, base_dir
+        )
+        if not workflow_path.is_file():
+            raise WorkflowV2ConfigError(
+                f"{context}.workflow does not exist: {workflow_path}"
+            )
+        return RunWorkflowStep(**base, workflow_path=workflow_path)
+
     template = Path(_string(data, "template", context))
     if not template.is_absolute():
         template = project_root / template
@@ -427,15 +468,23 @@ def load_workflow_v2(path: Path, project_root: Path) -> WorkflowDefinition:
     raw_steps = root.get("steps")
     if not isinstance(raw_steps, list) or not raw_steps:
         raise WorkflowV2ConfigError("workflow.steps must be a non-empty array.")
+    base_dir = path.resolve().parent
     steps: list[WorkflowStep] = []
     ids: set[str] = set()
     for index, raw_step in enumerate(raw_steps):
         context = f"workflow.steps[{index}]"
-        step = _load_step(_object(raw_step, context), context, project_root)
+        step = _load_step(_object(raw_step, context), context, project_root, base_dir)
         if step.id in ids:
             raise WorkflowV2ConfigError(f"Duplicate workflow step id: {step.id!r}.")
         ids.add(step.id)
         steps.append(step)
+
+    resolved_path = path.resolve()
+    for step in steps:
+        if isinstance(step, RunWorkflowStep) and step.workflow_path == resolved_path:
+            raise WorkflowV2ConfigError(
+                f"workflow.steps: step {step.id!r} runs the workflow itself."
+            )
 
     return WorkflowDefinition(
         name=_string(root, "name", "workflow"),

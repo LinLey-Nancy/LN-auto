@@ -56,6 +56,7 @@ FIELD_LABELS = {
     "min_duration_ms": "最短延迟（毫秒）",
     "max_duration_ms": "最长延迟（毫秒）",
     "sensitive": "敏感内容",
+    "workflow": "子工作流文件",
 }
 
 FIELD_HELP = {
@@ -118,6 +119,11 @@ FIELD_HELP = {
     "min_duration_ms": "随机延迟可能产生的最短时间，必须小于或等于最长延迟。",
     "max_duration_ms": "随机延迟可能产生的最长时间，必须大于或等于最短延迟。",
     "sensitive": "开启后，运行结果不会回显输入文本，适合密码或其他敏感内容。",
+    "workflow": (
+        "要作为子步骤执行的现有工作流 JSON 文件。相对路径优先在 workflow 目录中"
+        "查找，其次在项目目录中查找。子工作流使用自己的运行设置，且不允许"
+        "直接或间接调用自身。"
+    ),
 }
 
 CHOICES = {
@@ -140,6 +146,7 @@ class PropertyEditor(QWidget):
     property_changed = Signal(int, str, object)
     template_select_requested = Signal(int)
     template_create_requested = Signal(int)
+    workflow_select_requested = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -224,6 +231,8 @@ class PropertyEditor(QWidget):
             widget.setObjectName("mutedLabel")
         elif key == "template":
             widget = self._template_path_widget(value)
+        elif key == "workflow" and self._step_type == "run_workflow":
+            widget = self._workflow_path_widget(value)
         elif key in CHOICES:
             widget = QComboBox()
             choices = CHOICES[key]
@@ -317,6 +326,33 @@ class PropertyEditor(QWidget):
         layout.addWidget(select_button)
         layout.addWidget(create_button)
         host.setAccessibleName("模板路径")
+        return host
+
+    def _workflow_path_widget(self, value: Any) -> QWidget:
+        host = QWidget()
+        layout = QHBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        editor = QLineEdit(self._format_value(value))
+        editor.setObjectName("workflowPathEdit")
+        editor.setPlaceholderText("例如：子流程.json")
+        editor.editingFinished.connect(
+            lambda control=editor, original=value: self._emit(
+                "workflow",
+                self._parse_text(control.text(), original, "workflow"),
+            )
+        )
+        select_button = QPushButton("选择文件")
+        select_button.setObjectName("selectWorkflowButton")
+        select_button.setToolTip("从 workflow 目录或磁盘中选择一个已有的工作流 JSON 文件。")
+        select_button.clicked.connect(
+            lambda: self.workflow_select_requested.emit(self._step_index)
+        )
+
+        layout.addWidget(editor, 1)
+        layout.addWidget(select_button)
+        host.setAccessibleName("子工作流文件")
         return host
 
     @staticmethod

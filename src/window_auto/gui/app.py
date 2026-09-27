@@ -6,12 +6,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtCore import QLibraryInfo, QTimer, QTranslator
 from PySide6.QtWidgets import QApplication
 
 from window_auto.gui.main_window import MainWindow
 from window_auto.gui.theme import APP_STYLE
+from window_auto.paths import project_root
 
 
 def install_chinese_translations(app: QApplication) -> bool:
@@ -40,6 +41,9 @@ def create_application(argv: list[str] | None = None) -> QApplication:
         if families:
             app.setFont(QFont(families[0], 10))
     app.setStyleSheet(APP_STYLE)
+    icon_path = project_root() / "assets" / "resource" / "icon.png"
+    if icon_path.is_file():
+        app.setWindowIcon(QIcon(str(icon_path)))
     return app
 
 

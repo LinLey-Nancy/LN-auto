@@ -33,6 +33,42 @@ def _optional_positive_resolution(config: dict[str, Any], key: str) -> list[int]
     return value
 
 
+_HUMANIZE_KEYS = {"enabled", "click_jitter_px", "timing_jitter_ratio", "mouse_curve"}
+
+
+def _validate_humanize(humanize: Any) -> None:
+    if humanize is None:
+        return
+    if not isinstance(humanize, dict):
+        raise ValueError("controller.humanize must be an object.")
+    unknown_keys = set(humanize).difference(_HUMANIZE_KEYS)
+    if unknown_keys:
+        names = ", ".join(sorted(unknown_keys))
+        raise ValueError(f"controller.humanize has unknown keys: {names}")
+    enabled = humanize.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ValueError("controller.humanize.enabled must be a boolean.")
+    click_jitter_px = humanize.get("click_jitter_px", 3)
+    if (
+        isinstance(click_jitter_px, bool)
+        or not isinstance(click_jitter_px, int)
+        or click_jitter_px < 0
+    ):
+        raise ValueError("controller.humanize.click_jitter_px must be a non-negative integer.")
+    timing_jitter_ratio = humanize.get("timing_jitter_ratio", 0.4)
+    if (
+        isinstance(timing_jitter_ratio, bool)
+        or not isinstance(timing_jitter_ratio, (int, float))
+        or not 0 <= timing_jitter_ratio <= 0.9
+    ):
+        raise ValueError(
+            "controller.humanize.timing_jitter_ratio must be a number between 0 and 0.9."
+        )
+    mouse_curve = humanize.get("mouse_curve", True)
+    if not isinstance(mouse_curve, bool):
+        raise ValueError("controller.humanize.mouse_curve must be a boolean.")
+
+
 def load_config(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file does not exist: {path}")
@@ -86,6 +122,7 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ValueError("controller.direct_screen_input must be a boolean.")
     _optional_positive_resolution(config["controller"], "expected_raw_resolution")
     _optional_positive_resolution(config["controller"], "expected_screenshot_resolution")
+    _validate_humanize(config["controller"].get("humanize"))
 
     debug_dir = config["diagnostics"].get("debug_dir")
     if not isinstance(debug_dir, str) or not debug_dir.strip():

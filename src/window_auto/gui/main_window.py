@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QThread, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QCursor, QKeySequence
+from PySide6.QtCore import QSettings, QSize, QStandardPaths, Qt, QThread, QTimer, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QCursor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressDialog,
     QPushButton,
     QSizePolicy,
     QSpinBox,
@@ -37,10 +38,14 @@ from window_auto.config.loader import MAX_TIME_MS, load_config
 from window_auto.diagnostics.workspace import create_debug_workspace
 from window_auto.gui.document import STEP_LABELS, WorkflowDocument
 from window_auto.gui.property_editor import PropertyEditor
+from window_auto.gui.step_list import StepItemDelegate, summarize_step
 from window_auto.gui.template_creator import TemplateCreationDialog
+from window_auto.gui.update_checker import UpdateChecker, UpdateDownloader
 from window_auto.gui.window_dialog import WindowSelectorDialog
 from window_auto.gui.worker import WorkflowWorker
 from window_auto.paths import project_root, workflow_dir
+from window_auto.update import RELEASES_PAGE_URL, ReleaseInfo
+from window_auto.version import current_version
 from window_auto.windowing.discovery import WindowInfo
 from window_auto.workflow.events import WorkflowEvent, WorkflowEventType
 from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
@@ -130,6 +135,13 @@ class MainWindow(QMainWindow):
         self._mouse_timer.start()
         self._update_mouse_position()
         self._refresh_document()
+        self._update_check_manual = False
+        self._update_checker = UpdateChecker(self)
+        self._update_checker.update_available.connect(self._on_update_available)
+        self._update_checker.no_update.connect(self._on_no_update)
+        self._update_checker.check_failed.connect(self._on_update_check_failed)
+        self._update_downloader: UpdateDownloader | None = None
+        QTimer.singleShot(5000, self, self._auto_check_updates)
 
     def _update_mouse_position(self) -> None:
         position = QCursor.pos()
@@ -155,6 +167,20 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.open_action)
         file_menu.addAction(self.save_action)
         file_menu.addAction(self.save_as_action)
+
+        help_menu = self.menuBar().addMenu("帮助(&H)")
+        self.check_updates_action = QAction("检查更新…", self)
+        self.check_updates_action.triggered.connect(self.check_updates_manually)
+        self.auto_update_action = QAction("启动时自动检查更新", self)
+        self.auto_update_action.setCheckable(True)
+        self.auto_update_action.setChecked(self._auto_check_enabled())
+        self.auto_update_action.toggled.connect(self._set_auto_check)
+        self.about_action = QAction("关于 LN-auto", self)
+        self.about_action.triggered.connect(self._show_about)
+        help_menu.addAction(self.check_updates_action)
+        help_menu.addAction(self.auto_update_action)
+        help_menu.addSeparator()
+        help_menu.addAction(self.about_action)
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("主工具栏")
@@ -216,6 +242,7 @@ class MainWindow(QMainWindow):
         self.properties.property_changed.connect(self.update_property)
         self.properties.template_select_requested.connect(self.select_template_file)
         self.properties.template_create_requested.connect(self.create_template)
+        self.properties.workflow_select_requested.connect(self.select_workflow_file)
         splitter.addWidget(self.properties)
         splitter.setSizes((230, 420, 610))
         splitter.setCollapsible(0, False)
@@ -266,6 +293,7 @@ class MainWindow(QMainWindow):
         title_row.addWidget(self.auto_delay_combo)
         self.step_list = QListWidget()
         self.step_list.setAlternatingRowColors(True)
+        self.step_list.setItemDelegate(StepItemDelegate(self.step_list))
         self.step_list.currentRowChanged.connect(self.select_step)
         controls = QHBoxLayout()
         for text, callback in (
@@ -315,10 +343,13 @@ class MainWindow(QMainWindow):
         for index, step in enumerate(self.document.steps, start=1):
             enabled = "" if step.get("enabled", True) else "（已禁用）"
             label = STEP_LABELS.get(step.get("type"), str(step.get("type")))
+            summary = summarize_step(step)
             item = QListWidgetItem(
-                f"{index:02d}  {step.get('name', label)}\n      {label}  ·  {step.get('id')} {enabled}"
+                f"{index:02d}  {step.get('name', label)}\n"
+                f"{label}  ·  {step.get('id')}  ·  {summary} {enabled}".rstrip()
             )
-            item.setToolTip(str(step))
+            item.setData(Qt.ItemDataRole.UserRole, step)
+            item.setToolTip(summary or str(step))
             self.step_list.addItem(item)
         if not self.document.steps:
             empty = QListWidgetItem(
@@ -438,6 +469,36 @@ class MainWindow(QMainWindow):
         self._set_template_path(index, Path(filename))
         self.statusBar().showMessage(f"已选择模板：{filename}", 5000)
         self.append_log(f"模板文件已选择：{filename}")
+
+    def _set_workflow_path(self, index: int, path: Path) -> None:
+        if not 0 <= index < len(self.document.steps):
+            return
+        if self.document.steps[index].get("type") != "run_workflow":
+            return
+        resolved = path.resolve()
+        try:
+            stored_path = resolved.relative_to(WORKFLOW_DIRECTORY).as_posix()
+        except ValueError:
+            try:
+                stored_path = resolved.relative_to(PROJECT_ROOT).as_posix()
+            except ValueError:
+                stored_path = resolved.as_posix()
+        self.document.update_step(index, "workflow", stored_path)
+        self._refresh_document(index)
+        self._update_title()
+
+    def select_workflow_file(self, index: int) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择子工作流",
+            str(WORKFLOW_DIRECTORY),
+            "工作流 JSON (*.json)",
+        )
+        if not filename:
+            return
+        self._set_workflow_path(index, Path(filename))
+        self.statusBar().showMessage(f"已选择子工作流：{filename}", 5000)
+        self.append_log(f"子工作流已选择：{filename}")
 
     def create_template(self, index: int) -> None:
         if not 0 <= index < len(self.document.steps):
@@ -650,6 +711,183 @@ class MainWindow(QMainWindow):
             self.stop_button.setEnabled(False)
             self.statusBar().showMessage("正在安全停止…")
             self.append_log("已请求停止，将在当前安全边界结束。")
+
+    def _update_settings(self) -> QSettings:
+        return QSettings()
+
+    def _auto_check_enabled(self) -> bool:
+        return bool(
+            self._update_settings().value("update/auto_check", True, type=bool)
+        )
+
+    def _set_auto_check(self, enabled: bool) -> None:
+        self._update_settings().setValue("update/auto_check", enabled)
+        state = "开启" if enabled else "关闭"
+        self.statusBar().showMessage(f"启动时自动检查更新已{state}", 5000)
+
+    def _auto_check_updates(self) -> None:
+        if self._auto_check_enabled():
+            self._start_update_check(manual=False)
+
+    def check_updates_manually(self) -> None:
+        self._start_update_check(manual=True)
+
+    def _start_update_check(self, manual: bool) -> None:
+        self._update_check_manual = manual
+        if manual:
+            self.statusBar().showMessage("正在检查更新…")
+        self._update_checker.check()
+
+    def _on_update_available(self, release: ReleaseInfo) -> None:
+        settings = self._update_settings()
+        if not self._update_check_manual and release.version == settings.value(
+            "update/skipped_version", "", type=str
+        ):
+            self.append_log(f"发现新版本 v{release.version}（已设置为跳过该版本）。")
+            return
+        notes = release.notes.strip()
+        if len(notes) > 600:
+            notes = notes[:600].rstrip() + " …"
+        detail = f"发布于：{release.published_at[:10] or '未知'}"
+        if notes:
+            detail += f"\n\n更新说明：\n{notes}"
+        box = QMessageBox(self)
+        box.setWindowTitle("发现新版本")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(
+            f"发现新版本 v{release.version}（当前版本 v{current_version()}）。"
+        )
+        box.setInformativeText(detail)
+        download_button = box.addButton("立即下载", QMessageBox.ButtonRole.AcceptRole)
+        skip_button = box.addButton("跳过此版本", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("稍后提醒", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(download_button)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is skip_button:
+            settings.setValue("update/skipped_version", release.version)
+            self.append_log(f"已跳过版本 v{release.version}。")
+        elif clicked is download_button:
+            self._download_update(release)
+
+    def _on_no_update(self) -> None:
+        if self._update_check_manual:
+            version = current_version()
+            self.statusBar().showMessage("已是最新版本", 5000)
+            QMessageBox.information(
+                self, "检查更新", f"当前已是最新版本（v{version}）。"
+            )
+
+    def _on_update_check_failed(self, message: str) -> None:
+        if self._update_check_manual:
+            self.statusBar().showMessage("检查更新失败", 5000)
+            QMessageBox.warning(
+                self,
+                "检查更新失败",
+                f"无法检查更新：{message}\n\n"
+                f"可稍后重试，或访问发布页手动下载：\n{RELEASES_PAGE_URL}",
+            )
+        else:
+            self.append_log(f"自动检查更新失败：{message}")
+
+    def _download_update(self, release: ReleaseInfo) -> None:
+        asset = release.asset
+        if asset is None:
+            answer = QMessageBox.question(
+                self,
+                "未找到安装包",
+                "该版本没有可下载的安装包。是否打开发布页面手动下载？",
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl(release.html_url))
+            return
+        downloads = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DownloadLocation
+        )
+        destination = str(Path(downloads or str(Path.home())) / asset.name)
+        downloader = UpdateDownloader(self)
+        self._update_downloader = downloader
+        progress = QProgressDialog("正在下载更新…", "取消", 0, 100, self)
+        progress.setWindowTitle("下载更新")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        def on_progress(received: int, total: int) -> None:
+            received_mb = received / 1_048_576
+            if total > 0:
+                progress.setValue(min(100, int(received * 100 / total)))
+                progress.setLabelText(
+                    f"正在下载 {asset.name}：{received_mb:.1f} / {total / 1_048_576:.1f} MB"
+                )
+            else:
+                progress.setLabelText(f"正在下载 {asset.name}：已接收 {received_mb:.1f} MB")
+
+        downloader.progressed.connect(on_progress)
+        progress.canceled.connect(downloader.cancel)
+        downloader.succeeded.connect(
+            lambda path, dialog=progress: self._on_update_downloaded(path, dialog)
+        )
+        downloader.failed.connect(
+            lambda message, dialog=progress, info=release: self._on_update_download_failed(
+                message, dialog, info
+            )
+        )
+        downloader.start(asset.download_url, destination)
+        self.append_log(f"开始下载更新：{asset.name}")
+
+    def _on_update_downloaded(self, path: str, progress: QProgressDialog) -> None:
+        progress.close()
+        progress.deleteLater()
+        self.append_log(f"更新已下载：{path}")
+        self._prompt_install(path)
+
+    def _on_update_download_failed(
+        self, message: str, progress: QProgressDialog, release: ReleaseInfo
+    ) -> None:
+        progress.close()
+        progress.deleteLater()
+        box = QMessageBox(self)
+        box.setWindowTitle("下载失败")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"更新下载失败：{message}")
+        box.setInformativeText("可以重试，或打开发布页面手动下载。")
+        open_button = box.addButton("打开发布页", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("关闭", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_button:
+            QDesktopServices.openUrl(QUrl(release.html_url))
+
+    def _prompt_install(self, path: str) -> None:
+        if self._thread is not None:
+            QMessageBox.information(
+                self,
+                "工作流正在运行",
+                f"安装包已下载完成。请先停止工作流，再手动运行安装程序：\n{path}",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "下载完成",
+            f"新版本安装包已下载到：\n{path}\n\n是否现在退出 LN-auto 并运行安装程序？",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+            self.append_log("已启动安装程序，正在退出 LN-auto…")
+            QTimer.singleShot(500, self.close)
+        else:
+            QMessageBox.warning(
+                self, "无法启动安装程序", f"请手动运行安装程序：\n{path}"
+            )
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "关于 LN-auto",
+            f"LN-auto v{current_version()}\n\n"
+            "基于 MaaFramework 的 Windows 工作流自动化工具。",
+        )
 
     def on_workflow_event(self, event: object) -> None:
         if isinstance(event, WorkflowEvent):

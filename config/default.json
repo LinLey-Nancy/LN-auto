@@ -11,6 +11,12 @@
     "keyboard_input": "PostMessage",
     "mouse_lock_follow": false,
     "direct_screen_input": false,
+    "humanize": {
+      "enabled": true,
+      "click_jitter_px": 3,
+      "timing_jitter_ratio": 0.4,
+      "mouse_curve": true
+    },
     "screenshot_target_long_side": 1280,
     "capture_scope": "window",
     "expected_raw_resolution": [1920, 1080],

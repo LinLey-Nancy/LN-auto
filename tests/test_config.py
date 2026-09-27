@@ -132,5 +132,69 @@ class DefaultConfigTests(unittest.TestCase):
             load_config(path)
 
 
+class HumanizeConfigTests(unittest.TestCase):
+    def _write_modified_config(self, mutate) -> Path:
+        project_root = Path(__file__).resolve().parents[1]
+        default_path = project_root / "config" / "default.json"
+        config = json.loads(default_path.read_text(encoding="utf-8"))
+        mutate(config)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "config.json"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        return path
+
+    def test_default_config_enables_humanize(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        config = load_config(project_root / "config" / "default.json")
+
+        humanize = config["controller"]["humanize"]
+        self.assertTrue(humanize["enabled"])
+        self.assertGreater(humanize["click_jitter_px"], 0)
+        self.assertGreater(humanize["timing_jitter_ratio"], 0)
+        self.assertTrue(humanize["mouse_curve"])
+
+    def test_missing_humanize_section_is_allowed(self) -> None:
+        path = self._write_modified_config(
+            lambda config: config["controller"].pop("humanize")
+        )
+
+        config = load_config(path)
+
+        self.assertNotIn("humanize", config["controller"])
+
+    def test_non_object_humanize_is_rejected(self) -> None:
+        path = self._write_modified_config(
+            lambda config: config["controller"].__setitem__("humanize", "yes")
+        )
+        with self.assertRaisesRegex(ValueError, "humanize"):
+            load_config(path)
+
+    def test_unknown_humanize_key_is_rejected(self) -> None:
+        path = self._write_modified_config(
+            lambda config: config["controller"]["humanize"].__setitem__("teleport", True)
+        )
+        with self.assertRaisesRegex(ValueError, "humanize"):
+            load_config(path)
+
+    def test_out_of_range_timing_jitter_ratio_is_rejected(self) -> None:
+        path = self._write_modified_config(
+            lambda config: config["controller"]["humanize"].__setitem__(
+                "timing_jitter_ratio", 1.5
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "timing_jitter_ratio"):
+            load_config(path)
+
+    def test_negative_click_jitter_is_rejected(self) -> None:
+        path = self._write_modified_config(
+            lambda config: config["controller"]["humanize"].__setitem__(
+                "click_jitter_px", -1
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "click_jitter_px"):
+            load_config(path)
+
+
 if __name__ == "__main__":
     unittest.main()

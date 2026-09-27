@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QMessageBox, QPushButton
 
 from window_auto.gui.app import create_application
@@ -43,7 +44,7 @@ class GuiSmokeTests(unittest.TestCase):
     def test_main_window_builds_and_adds_a_step(self) -> None:
         window = MainWindow()
 
-        self.assertEqual(window.palette.count(), 6)
+        self.assertEqual(window.palette.count(), 7)
         self.assertFalse(window.stop_button.isEnabled())
         self.assertTrue(window.run_button.isEnabled())
         window.palette.setCurrentRow(5)
@@ -234,6 +235,107 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIn(window.save_as_action, menu_actions)
         window.document.dirty = False
         window.close()
+
+    def test_run_workflow_step_has_file_picker(self) -> None:
+        window = MainWindow()
+        window.palette.setCurrentRow(6)
+        window.add_selected_action()
+
+        self.assertEqual(window.document.steps[0]["type"], "run_workflow")
+        self.assertIsNotNone(
+            window.properties.findChild(QPushButton, "selectWorkflowButton")
+        )
+        labels = {label.text() for label in window.properties.findChildren(QLabel)}
+        self.assertIn("子工作流文件：", labels)
+
+        window.document.dirty = False
+        window.close()
+
+    def test_help_menu_offers_update_actions(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings_path = str(Path(directory) / "settings.ini")
+
+            def make_settings() -> QSettings:
+                return QSettings(settings_path, QSettings.Format.IniFormat)
+
+            with patch(
+                "window_auto.gui.main_window.QSettings", side_effect=make_settings
+            ):
+                window = MainWindow()
+
+                menu_titles = [
+                    action.text() for action in window.menuBar().actions()
+                ]
+                self.assertIn("帮助(&H)", menu_titles)
+                self.assertTrue(window.auto_update_action.isCheckable())
+                self.assertTrue(window.auto_update_action.isChecked())
+
+                window.auto_update_action.setChecked(False)
+                self.assertFalse(window._auto_check_enabled())
+                window.auto_update_action.setChecked(True)
+                self.assertTrue(window._auto_check_enabled())
+
+                # Building the window must not start any network request.
+                self.assertIsNone(window._update_checker._reply)
+
+                window.document.dirty = False
+                window.close()
+
+    def test_step_list_items_include_parameter_summary(self) -> None:
+        window = MainWindow()
+        window.palette.setCurrentRow(5)  # 延迟
+        window.add_selected_action()
+
+        text = window.step_list.item(0).text()
+
+        self.assertIn("固定 500 毫秒", text)
+        self.assertIn("延迟", text)
+        window.document.dirty = False
+        window.close()
+
+    def test_summarize_step_describes_each_type(self) -> None:
+        from window_auto.gui.step_list import summarize_step
+
+        self.assertEqual(
+            summarize_step({"type": "wait", "delay_mode": "fixed", "duration_ms": 500}),
+            "固定 500 毫秒",
+        )
+        self.assertEqual(
+            summarize_step(
+                {
+                    "type": "wait",
+                    "delay_mode": "random",
+                    "min_duration_ms": 100,
+                    "max_duration_ms": 900,
+                }
+            ),
+            "随机 100~900 毫秒",
+        )
+        self.assertEqual(
+            summarize_step(
+                {"type": "mouse_click", "x": 100, "y": 200, "button": "left", "count": 1}
+            ),
+            "左键点击 (100, 200)",
+        )
+        self.assertEqual(
+            summarize_step(
+                {"type": "mouse_click", "match_variable": "match", "button": "left", "count": 2}
+            ),
+            "左键双击 识别结果「match」",
+        )
+        self.assertEqual(
+            summarize_step({"type": "key_press", "key": "S", "modifiers": ["CTRL"]}),
+            "按键 CTRL+S",
+        )
+        self.assertEqual(
+            summarize_step({"type": "run_workflow", "workflow": "child.json"}),
+            "子工作流 child.json",
+        )
+        sensitive = summarize_step(
+            {"type": "text_input", "text": "secret", "sensitive": True}
+        )
+        self.assertIn("敏感内容", sensitive)
+        self.assertNotIn("secret", sensitive)
 
     def test_numeric_virtual_key_codes_parse_to_integers(self) -> None:
         self.assertEqual(PropertyEditor._parse_text("65", "ENTER", "key"), 65)

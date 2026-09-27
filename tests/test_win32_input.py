@@ -75,5 +75,45 @@ class ClickClientPointMessageTests(unittest.TestCase):
         self.assertNotIn("outside", message)
 
 
+class ClickClientPointHumanizeTests(unittest.TestCase):
+    def test_move_curve_moves_cursor_in_steps_before_clicking(self) -> None:
+        user32 = Mock()
+        user32.IsWindow.return_value = True
+        user32.IsIconic.return_value = False
+        user32.GetForegroundWindow.return_value = _Window.hwnd
+
+        def get_client_rect(_hwnd, rect_ptr) -> bool:
+            rect = rect_ptr._obj
+            rect.left, rect.top, rect.right, rect.bottom = 0, 0, 100, 100
+            return True
+
+        user32.GetClientRect.side_effect = get_client_rect
+        user32.ClientToScreen.return_value = True
+
+        positions: list[tuple[int, int]] = []
+
+        def set_cursor_pos(x: int, y: int) -> bool:
+            positions.append((x, y))
+            return True
+
+        user32.SetCursorPos.side_effect = set_cursor_pos
+
+        def get_cursor_pos(point_ptr) -> bool:
+            point = point_ptr._obj
+            point.x, point.y = positions[-1] if positions else (10, 10)
+            return True
+
+        user32.GetCursorPos.side_effect = get_cursor_pos
+
+        with patch(
+            "window_auto.runtime.win32_input.ctypes.WinDLL", return_value=user32
+        ):
+            result = click_client_point(_Window(), (80, 80), "left", move_curve=True)
+
+        self.assertEqual(result, (80, 80))
+        self.assertGreater(len(positions), 2)
+        self.assertEqual(positions[-1], (80, 80))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -59,6 +59,12 @@
       "key": "S",
       "modifiers": ["CTRL"],
       "hold_ms": 80
+    },
+    {
+      "id": "run-cleanup",
+      "type": "run_workflow",
+      "name": "执行清理子工作流",
+      "workflow": "cleanup.local.json"
     }
   ]
 }

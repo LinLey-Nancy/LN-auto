@@ -15,6 +15,13 @@ from window_auto.diagnostics.desktop_scope import (
     scale_box_between_sizes,
 )
 from window_auto.diagnostics.template_match import MatchBox, recognize_template
+from window_auto.runtime.humanize import (
+    curve_points,
+    humanize_from_config,
+    jitter_duration_ms,
+    jitter_point,
+    uniform_seconds,
+)
 from window_auto.runtime.win32_input import DirectInputError, click_client_point
 from window_auto.workflow.context import ExecutionContext
 from window_auto.workflow.model import (
@@ -56,30 +63,71 @@ def _successful(job, description: str) -> None:
         )
 
 
+def _humanize(context: ExecutionContext):
+    session_config = getattr(context.session, "config", None)
+    if not isinstance(session_config, dict):
+        session_config = {}
+    return humanize_from_config(session_config)
+
+
+def _jittered_interval_ms(base_ms: int, context: ExecutionContext) -> int:
+    return jitter_duration_ms(base_ms, _humanize(context).timing_jitter_ratio)
+
+
+def _move_pointer_along_curve(
+    context: ExecutionContext,
+    target: tuple[int, int],
+) -> None:
+    """Glide the pointer from its last known position toward ``target``."""
+    start = context.pointer
+    if start is None or tuple(start) == tuple(target):
+        return
+    for x, y in curve_points(tuple(start), tuple(target))[:-1]:
+        context.cancellation.check()
+        _successful(
+            context.session.controller.post_touch_move(x, y),
+            f"mouse move to {(x, y)}",
+        )
+        context.cancellation.wait(uniform_seconds(0.004, 0.012))
+
+
 def _click(
     context: ExecutionContext,
     point: tuple[int, int],
     button: str,
     description: str,
-) -> None:
+) -> tuple[int, int]:
     session_config = getattr(context.session, "config", {})
     controller_config = session_config.get("controller", {})
+    humanize = _humanize(context)
+    if humanize.click_jitter_px:
+        point = jitter_point((int(point[0]), int(point[1])), humanize.click_jitter_px)
+    point = (int(point[0]), int(point[1]))
     if controller_config.get("direct_screen_input", False):
         window = context.session.window
         if window is None:
             raise WorkflowActionError(
                 "前台精确输入需要先选择目标窗口，请先点击“选择窗口”。"
             )
+        direct_options: dict[str, object] = {}
+        if humanize.enabled:
+            direct_options["hold_seconds"] = uniform_seconds(0.04, 0.12)
+            direct_options["move_curve"] = humanize.mouse_curve
         try:
-            click_client_point(window, point, button)
+            click_client_point(window, point, button, **direct_options)
         except DirectInputError as error:
             raise WorkflowActionError(str(error)) from error
-        return
+        context.pointer = point
+        return point
+    if humanize.mouse_curve:
+        _move_pointer_along_curve(context, point)
     contact = {"left": 0, "right": 1, "middle": 2}[button]
     _successful(
         context.session.controller.post_click(point[0], point[1], contact=contact),
         description,
     )
+    context.pointer = point
+    return point
 
 
 def _match_point(context: ExecutionContext, variable: str) -> tuple[int, int]:
@@ -232,6 +280,7 @@ def _press_key(
     controller = context.session.controller
     key = resolve_virtual_key(key_value)
     modifiers = [resolve_virtual_key(value) for value in modifier_values]
+    hold_ms = jitter_duration_ms(hold_ms, _humanize(context).timing_jitter_ratio)
     pressed: list[int] = []
     primary_error: BaseException | None = None
     try:
@@ -289,15 +338,18 @@ def _run_template_post_action(
         }
 
     count = 2 if step.post_action == "double_click" else 1
+    target = point
     for click_index in range(count):
-        _click(
+        point = _click(
             context,
-            point,
+            target,
             step.post_button,
-            f"{step.post_button} post-recognition click at {point}",
+            f"{step.post_button} post-recognition click at {target}",
         )
         if click_index + 1 < count:
-            context.cancellation.wait(step.post_action_interval_ms / 1000.0)
+            context.cancellation.wait(
+                _jittered_interval_ms(step.post_action_interval_ms, context) / 1000.0
+            )
     return {
         "action": step.post_action,
         "point": point,
@@ -325,8 +377,9 @@ def _run_text_input(step: TextInputStep, context: ExecutionContext) -> ActionRes
             finally:
                 if shift_required:
                     _successful(controller.post_key_up(0x10), "text shift up")
-            if step.interval_ms:
-                context.cancellation.wait(step.interval_ms / 1000.0)
+            interval_ms = _jittered_interval_ms(step.interval_ms, context)
+            if interval_ms:
+                context.cancellation.wait(interval_ms / 1000.0)
     return ActionResult(
         {
             "length": len(step.text),
@@ -359,20 +412,42 @@ def execute_action(step: WorkflowStep, context: ExecutionContext) -> ActionResul
                 controller.post_relative_move(step.delta_x, step.delta_y),
                 f"relative mouse move by {(step.delta_x, step.delta_y)}",
             )
+            if context.pointer is not None:
+                context.pointer = (
+                    context.pointer[0] + step.delta_x,
+                    context.pointer[1] + step.delta_y,
+                )
             return ActionResult(
                 {
                     "move_mode": "relative",
                     "delta": (step.delta_x, step.delta_y),
                 }
             )
-        _successful(
-            controller.post_touch_move(step.x, step.y),
-            f"mouse move to {(step.x, step.y)}",
-        )
+        target = (int(step.x), int(step.y))
+        humanize = _humanize(context)
+        if (
+            humanize.mouse_curve
+            and context.pointer is not None
+            and tuple(context.pointer) != target
+        ):
+            for x, y in curve_points(tuple(context.pointer), target):
+                context.cancellation.check()
+                _successful(
+                    controller.post_touch_move(x, y),
+                    f"mouse move to {(x, y)}",
+                )
+                if (x, y) != target:
+                    context.cancellation.wait(uniform_seconds(0.004, 0.012))
+        else:
+            _successful(
+                controller.post_touch_move(step.x, step.y),
+                f"mouse move to {(step.x, step.y)}",
+            )
+        context.pointer = target
         return ActionResult(
             {
                 "move_mode": "absolute",
-                "point": (step.x, step.y),
+                "point": target,
             }
         )
     if isinstance(step, MouseClickStep):
@@ -385,15 +460,18 @@ def execute_action(step: WorkflowStep, context: ExecutionContext) -> ActionResul
             raise WorkflowActionError(
                 "鼠标点击步骤缺少坐标或识别结果变量，请在步骤属性中补全后再运行。"
             )
+        base_point = (int(point[0]), int(point[1]))
         for click_index in range(step.count):
-            _click(
+            point = _click(
                 context,
-                (int(point[0]), int(point[1])),
+                base_point,
                 step.button,
-                f"{step.button} click at {point}",
+                f"{step.button} click at {base_point}",
             )
             if click_index + 1 < step.count:
-                context.cancellation.wait(step.interval_ms / 1000.0)
+                context.cancellation.wait(
+                    _jittered_interval_ms(step.interval_ms, context) / 1000.0
+                )
         return ActionResult({"point": point, "button": step.button, "count": step.count})
     if isinstance(step, KeyPressStep):
         return _run_key_press(step, context)

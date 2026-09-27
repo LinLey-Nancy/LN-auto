@@ -177,6 +177,45 @@ class WorkflowDocumentTests(unittest.TestCase):
 
             self.assertEqual(list(root.iterdir()), [])
 
+    def test_run_workflow_step_round_trips(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "child.json").write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "name": "child",
+                        "steps": [
+                            {"id": "w", "type": "wait", "name": "W", "duration_ms": 1}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            document = WorkflowDocument()
+            index = document.add_step("run_workflow")
+
+            self.assertEqual(document.steps[index]["name"], "执行工作流")
+            document.update_step(index, "workflow", "child.json")
+            saved = document.save(root / "parent.json", root)
+            loaded = WorkflowDocument.load(saved, root)
+
+            self.assertEqual(loaded.steps[0]["type"], "run_workflow")
+            self.assertEqual(loaded.steps[0]["workflow"], "child.json")
+
+    def test_save_rejects_run_workflow_self_reference(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "parent.json"
+            document = WorkflowDocument()
+            index = document.add_step("run_workflow")
+            document.update_step(index, "workflow", "parent.json")
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "自身"):
+                document.save(path, root)
+
+            self.assertFalse(path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

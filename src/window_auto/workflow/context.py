@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from threading import Event
 import time
 from typing import Any
@@ -51,3 +52,9 @@ class ExecutionContext:
     session: AutomationSession
     cancellation: CancellationToken
     variables: dict[str, Any] = field(default_factory=dict)
+    # Last pointer position delivered by this run, used as the starting point
+    # for humanized mouse curves. None means the position is unknown yet.
+    pointer: tuple[int, int] | None = None
+    # Resolved paths of the sub-workflow chain currently being executed,
+    # used to reject circular run_workflow references.
+    workflow_stack: tuple[Path, ...] = ()

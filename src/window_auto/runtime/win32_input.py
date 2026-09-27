@@ -7,6 +7,7 @@ from ctypes import wintypes
 import sys
 import time
 
+from window_auto.runtime.humanize import curve_points, uniform_seconds
 from window_auto.windowing.discovery import WindowInfo
 
 
@@ -36,8 +37,13 @@ def click_client_point(
     button: str,
     *,
     hold_seconds: float = 0.03,
+    move_curve: bool = False,
 ) -> tuple[int, int]:
-    """Foreground ``window`` and click an exact client point in screen pixels."""
+    """Foreground ``window`` and click an exact client point in screen pixels.
+
+    When ``move_curve`` is true the cursor approaches the target along an
+    eased curve from its current position instead of teleporting there.
+    """
     if sys.platform != "win32":
         raise DirectInputError("前台精确输入仅支持 Windows 系统。")
     if button not in _BUTTON_FLAGS:
@@ -113,6 +119,17 @@ def click_client_point(
         raise DirectInputError(
             "无法把点击坐标换算为屏幕坐标，未发送点击。请重新选择目标窗口后重试。"
         )
+    if move_curve:
+        current = wintypes.POINT()
+        if user32.GetCursorPos(ctypes.byref(current)) and (
+            (current.x, current.y) != (screen_point.x, screen_point.y)
+        ):
+            for step_x, step_y in curve_points(
+                (current.x, current.y),
+                (screen_point.x, screen_point.y),
+            )[:-1]:
+                user32.SetCursorPos(step_x, step_y)
+                time.sleep(uniform_seconds(0.004, 0.012))
     if not user32.SetCursorPos(screen_point.x, screen_point.y):
         raise DirectInputError(
             "Windows 拒绝移动鼠标光标，未发送点击。"

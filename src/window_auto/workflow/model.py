@@ -105,6 +105,12 @@ class TemplateMatchStep(StepBase):
     kind: Literal["template_match"] = field(default="template_match", init=False)
 
 
+@dataclass(frozen=True, slots=True)
+class RunWorkflowStep(StepBase):
+    workflow_path: Path = Path()
+    kind: Literal["run_workflow"] = field(default="run_workflow", init=False)
+
+
 WorkflowStep: TypeAlias = (
     WaitStep
     | MouseMoveStep
@@ -112,6 +118,7 @@ WorkflowStep: TypeAlias = (
     | KeyPressStep
     | TextInputStep
     | TemplateMatchStep
+    | RunWorkflowStep
 )
 
 

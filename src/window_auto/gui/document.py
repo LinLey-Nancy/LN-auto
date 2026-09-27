@@ -10,7 +10,11 @@ import re
 import tempfile
 from typing import Any
 
-from window_auto.workflow.loader import load_workflow_v2
+from window_auto.workflow.loader import (
+    WorkflowV2ConfigError,
+    load_workflow_v2,
+    resolve_workflow_reference,
+)
 
 
 STEP_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -58,6 +62,9 @@ STEP_DEFAULTS: dict[str, dict[str, Any]] = {
         "min_duration_ms": 300,
         "max_duration_ms": 800,
     },
+    "run_workflow": {
+        "workflow": "",
+    },
 }
 
 STEP_LABELS = {
@@ -67,6 +74,7 @@ STEP_LABELS = {
     "key_press": "键盘按键",
     "text_input": "文本输入",
     "wait": "延迟",
+    "run_workflow": "执行工作流",
 }
 
 AUTO_DELAY_DEFAULTS: dict[str, Any] = {
@@ -225,6 +233,19 @@ class WorkflowDocument:
             raise ValueError("Workflow path has not been selected.")
         output = output.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
+        if project_root is not None:
+            # The loader validates the temp copy under a different file name,
+            # so direct self-references must be checked against the real path.
+            for step in self.data.get("steps", []):
+                if step.get("type") != "run_workflow":
+                    continue
+                target = resolve_workflow_reference(
+                    str(step.get("workflow", "")), project_root, output.parent
+                )
+                if target == output:
+                    raise WorkflowV2ConfigError(
+                        f"步骤 {step.get('id')!r} 引用了工作流自身，无法保存。"
+                    )
         text = json.dumps(self.data, ensure_ascii=False, indent=2) + "\n"
         if project_root is not None:
             # Validate with the strict v2 loader before touching the target file,

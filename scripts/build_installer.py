@@ -40,6 +40,7 @@ INNO_TEMPLATE = """\
 #define AppId "{app_id}"
 #define AppDir "{app_dir}"
 #define OutDir "{out_dir}"
+#define AppIcon "{app_icon}"
 
 [Setup]
 AppId={{#AppId}}
@@ -59,6 +60,7 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
+SetupIconFile={{#AppIcon}}
 UninstallDisplayIcon={{app}}\\{app_name}.exe
 
 [Tasks]
@@ -115,9 +117,13 @@ def ensure_pyinstaller(python: Path) -> None:
     )
 
 
-def run_pyinstaller(python: Path) -> Path:
+def run_pyinstaller(python: Path, version: str) -> Path:
     if BUILD_DIR.exists():
         shutil.rmtree(BUILD_DIR)
+    BUILD_DIR.mkdir(parents=True)
+    # Frozen builds read this file to report the exact release version.
+    version_file = BUILD_DIR / "version.txt"
+    version_file.write_text(version + "\n", encoding="utf-8")
     app_dir = BUILD_DIR / "dist" / APP_NAME
     command = [
         str(python),
@@ -135,6 +141,10 @@ def run_pyinstaller(python: Path) -> Path:
         f"{ROOT / 'assets'};assets",
         "--add-data",
         f"{ROOT / 'config'};config",
+        "--add-data",
+        f"{version_file};.",
+        "--icon",
+        str(ROOT / "assets" / "resource" / "icon.ico"),
         "--distpath",
         str(BUILD_DIR / "dist"),
         "--workpath",
@@ -181,6 +191,7 @@ def compile_installer(iscc: Path, app_dir: Path, version: str) -> Path:
         version_info=version_info,
         app_dir=str(app_dir),
         out_dir=str(ROOT / "dist"),
+        app_icon=str(ROOT / "assets" / "resource" / "icon.ico"),
     )
     iss_path = ROOT / "build" / "installer.iss"
     iss_path.parent.mkdir(parents=True, exist_ok=True)
@@ -200,7 +211,7 @@ def main() -> int:
     python = venv_python()
     print(f"Python: {python}")
     ensure_pyinstaller(python)
-    app_dir = run_pyinstaller(python)
+    app_dir = run_pyinstaller(python, version)
     iscc = find_iscc()
     print(f"Inno Setup: {iscc}")
     installer = compile_installer(iscc, app_dir, version)

@@ -9,13 +9,22 @@ import threading
 
 from window_auto.application.session import AutomationSession
 from window_auto.config.loader import MAX_TIME_MS
-from window_auto.workflow.actions import ActionResult, TemplateNotFoundError, execute_action
+from window_auto.paths import project_root as fallback_project_root
+from window_auto.runtime.humanize import humanize_from_config
+from window_auto.workflow.actions import (
+    ActionResult,
+    TemplateNotFoundError,
+    WorkflowActionError,
+    execute_action,
+)
 from window_auto.workflow.context import CancellationToken, ExecutionContext, WorkflowCancelled
 from window_auto.workflow.events import WorkflowEvent, WorkflowEventType
+from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
 from window_auto.workflow.model import (
     AutoDelay,
     KeyPressStep,
     MouseClickStep,
+    RunWorkflowStep,
     TemplateMatchStep,
     TextInputStep,
     WaitStep,
@@ -26,6 +35,10 @@ from window_auto.workflow.model import (
 # SystemRandom draws from the OS entropy source, so random delays cannot be
 # predicted or reproduced from a seeded pseudo-random sequence.
 _AUTO_DELAY_RANDOM = random.SystemRandom()
+
+# Sub-workflows (run_workflow steps) may nest, but only to a bounded depth so a
+# misconfigured chain cannot recurse forever.
+MAX_SUB_WORKFLOW_DEPTH = 8
 
 
 class WorkflowExecutionError(RuntimeError):
@@ -88,6 +101,14 @@ class WorkflowEngine:
     ) -> WorkflowRunResult:
         cancellation = cancellation or CancellationToken()
         context = ExecutionContext(session=session, cancellation=cancellation)
+        return self._run_definition(definition, context, cancellation)
+
+    def _run_definition(
+        self,
+        definition: WorkflowDefinition,
+        context: ExecutionContext,
+        cancellation: CancellationToken,
+    ) -> WorkflowRunResult:
         results: list[StepRunResult] = []
         self._emit(WorkflowEventType.WORKFLOW_STARTED, definition)
 
@@ -175,6 +196,43 @@ class WorkflowEngine:
         self._emit(WorkflowEventType.WORKFLOW_SUCCEEDED, definition)
         return WorkflowRunResult(definition.name, tuple(results))
 
+    def _run_sub_workflow(
+        self,
+        step: RunWorkflowStep,
+        context: ExecutionContext,
+        cancellation: CancellationToken,
+    ) -> ActionResult:
+        path = step.workflow_path
+        if path in context.workflow_stack:
+            chain = " → ".join(p.name for p in (*context.workflow_stack, path))
+            raise WorkflowActionError(f"检测到子工作流循环调用：{chain}。")
+        if len(context.workflow_stack) >= MAX_SUB_WORKFLOW_DEPTH:
+            raise WorkflowActionError(
+                f"子工作流嵌套层级超过上限 {MAX_SUB_WORKFLOW_DEPTH} 层。"
+            )
+        session_root = getattr(context.session, "project_root", None)
+        try:
+            definition = load_workflow_v2(path, session_root or fallback_project_root())
+        except WorkflowV2ConfigError as error:
+            raise WorkflowActionError(f"子工作流无法加载：{error}") from error
+        child_token = CancellationToken(parent=cancellation)
+        child_context = ExecutionContext(
+            session=context.session,
+            cancellation=child_token,
+            variables=context.variables,
+            pointer=context.pointer,
+            workflow_stack=(*context.workflow_stack, path),
+        )
+        result = self._run_definition(definition, child_context, child_token)
+        context.pointer = child_context.pointer
+        if result.cancelled:
+            raise WorkflowCancelled("Workflow execution was cancelled.")
+        failed = [item for item in result.steps if not item.succeeded]
+        return ActionResult(
+            f"子工作流“{definition.name}”完成："
+            f"{len(result.steps) - len(failed)}/{len(result.steps)} 个步骤成功"
+        )
+
     def _apply_auto_delay(
         self,
         definition: WorkflowDefinition,
@@ -207,6 +265,13 @@ class WorkflowEngine:
         context: ExecutionContext,
         cancellation: CancellationToken,
     ) -> ActionResult:
+        # A run_workflow step expands into another whole workflow whose total
+        # duration is unknowable, so — like a wait step — it is exempt from the
+        # default timeout; the sub-workflow's own steps stay guarded by the
+        # sub-workflow's settings.
+        if isinstance(step, RunWorkflowStep):
+            return self._run_sub_workflow(step, context, cancellation)
+
         # A wait step is itself a deliberate delay, so its configured duration
         # is always allowed to complete; the timeout guards every other step.
         timeout_ms = definition.settings.default_timeout_ms
@@ -216,9 +281,14 @@ class WorkflowEngine:
         # Steps that deliberately wait by configuration (recognition polling,
         # key holds, click/typing intervals) get that budget on top of the
         # default timeout, so a legal long-polling setup is never killed early.
-        # The cap keeps threading.Timer far below platform overflow limits.
+        # Timing jitter extends each wait by up to the configured ratio, and
+        # the cap keeps threading.Timer far below platform overflow limits.
+        humanize = humanize_from_config(getattr(context.session, "config", {}) or {})
+        intrinsic_ms = _intrinsic_wait_budget_ms(step)
+        if humanize.enabled and humanize.timing_jitter_ratio > 0:
+            intrinsic_ms = int(intrinsic_ms * (1.0 + humanize.timing_jitter_ratio))
         timeout_ms = min(
-            timeout_ms + _intrinsic_wait_budget_ms(step),
+            timeout_ms + intrinsic_ms,
             7 * MAX_TIME_MS,
         )
 
@@ -228,6 +298,7 @@ class WorkflowEngine:
             session=context.session,
             cancellation=step_token,
             variables=context.variables,
+            pointer=context.pointer,
         )
         watchdog.start()
         try:
@@ -242,6 +313,7 @@ class WorkflowEngine:
                 "可在工作流设置中调大 default_timeout_ms 后重试。"
             ) from None
         finally:
+            context.pointer = step_context.pointer
             watchdog.cancel()
 
 

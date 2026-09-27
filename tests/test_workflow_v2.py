@@ -27,6 +27,7 @@ from window_auto.workflow.model import (
     KeyPressStep,
     MouseClickStep,
     MouseMoveStep,
+    RunWorkflowStep,
     TemplateMatchStep,
     TextInputStep,
     WaitStep,
@@ -749,6 +750,218 @@ class WorkflowV2ActionTests(unittest.TestCase):
                 )
 
 
+class HumanizeActionTests(unittest.TestCase):
+    def _context_with_humanize(self, **overrides) -> tuple[_Session, ExecutionContext]:
+        session, context = _context()
+        humanize = {
+            "enabled": True,
+            "click_jitter_px": 0,
+            "timing_jitter_ratio": 0.0,
+            "mouse_curve": False,
+        }
+        humanize.update(overrides)
+        session.config = {"controller": {"humanize": humanize}}
+        return session, context
+
+    def test_click_jitter_keeps_point_within_radius(self) -> None:
+        session, context = self._context_with_humanize(click_jitter_px=4)
+        step = MouseClickStep(id="click", name="Click", x=500, y=300)
+
+        for _ in range(30):
+            execute_action(step, context)
+
+        clicks = [call for call in session.controller.calls if call[0] == "click"]
+        self.assertEqual(len(clicks), 30)
+        for _, x, y, _ in clicks:
+            self.assertLessEqual(abs(x - 500), 4)
+            self.assertLessEqual(abs(y - 300), 4)
+        self.assertGreater(len({(x, y) for _, x, y, _ in clicks}), 1)
+
+    def test_zero_jitter_radius_hits_exact_point(self) -> None:
+        session, context = self._context_with_humanize(click_jitter_px=0)
+
+        result = execute_action(
+            MouseClickStep(id="click", name="Click", x=30, y=40),
+            context,
+        )
+
+        self.assertEqual(session.controller.calls, [("click", 30, 40, 0)])
+        self.assertEqual(result.output["point"], (30, 40))
+
+    def test_key_hold_is_jittered_within_ratio(self) -> None:
+        session, _ = self._context_with_humanize(timing_jitter_ratio=0.5)
+        cancellation = Mock()
+        context = ExecutionContext(session=session, cancellation=cancellation)
+
+        execute_action(
+            KeyPressStep(id="key", name="Key", key="A", hold_ms=100),
+            context,
+        )
+
+        (hold_seconds,), _ = cancellation.wait.call_args
+        self.assertGreaterEqual(hold_seconds, 0.05)
+        self.assertLessEqual(hold_seconds, 0.15)
+
+    def test_click_interval_is_jittered_within_ratio(self) -> None:
+        session, _ = self._context_with_humanize(timing_jitter_ratio=0.5)
+        cancellation = Mock()
+        context = ExecutionContext(session=session, cancellation=cancellation)
+
+        execute_action(
+            MouseClickStep(id="click", name="Click", x=1, y=1, count=3, interval_ms=100),
+            context,
+        )
+
+        self.assertEqual(cancellation.wait.call_count, 2)
+        for call in cancellation.wait.call_args_list:
+            (interval_seconds,), _ = call
+            self.assertGreaterEqual(interval_seconds, 0.05)
+            self.assertLessEqual(interval_seconds, 0.15)
+
+    def test_text_input_interval_is_jittered_within_ratio(self) -> None:
+        session, _ = self._context_with_humanize(timing_jitter_ratio=0.5)
+        cancellation = Mock()
+        context = ExecutionContext(session=session, cancellation=cancellation)
+
+        execute_action(
+            TextInputStep(
+                id="text",
+                name="Type",
+                text="ab",
+                strategy="key_sequence",
+                interval_ms=100,
+            ),
+            context,
+        )
+
+        self.assertEqual(cancellation.wait.call_count, 2)
+        for call in cancellation.wait.call_args_list:
+            (interval_seconds,), _ = call
+            self.assertGreaterEqual(interval_seconds, 0.05)
+            self.assertLessEqual(interval_seconds, 0.15)
+
+    def test_mouse_move_follows_curve_from_known_pointer(self) -> None:
+        session, context = self._context_with_humanize(mouse_curve=True)
+        context.pointer = (0, 0)
+
+        execute_action(
+            MouseMoveStep(id="move", name="Move", x=300, y=0),
+            context,
+        )
+
+        moves = [call for call in session.controller.calls if call[0] == "move"]
+        self.assertGreaterEqual(len(moves), 3)
+        self.assertEqual(moves[-1], ("move", 300, 0))
+        self.assertEqual(context.pointer, (300, 0))
+
+    def test_first_move_without_known_pointer_jumps_directly(self) -> None:
+        session, context = self._context_with_humanize(mouse_curve=True)
+
+        execute_action(
+            MouseMoveStep(id="move", name="Move", x=300, y=0),
+            context,
+        )
+
+        self.assertEqual(session.controller.calls, [("move", 300, 0)])
+        self.assertEqual(context.pointer, (300, 0))
+
+    def test_click_glides_pointer_before_clicking(self) -> None:
+        session, context = self._context_with_humanize(
+            click_jitter_px=0,
+            mouse_curve=True,
+        )
+        context.pointer = (0, 0)
+
+        execute_action(
+            MouseClickStep(id="click", name="Click", x=200, y=0),
+            context,
+        )
+
+        calls = session.controller.calls
+        self.assertEqual(calls[-1], ("click", 200, 0, 0))
+        self.assertGreater(len(calls), 1)
+        self.assertTrue(all(call[0] == "move" for call in calls[:-1]))
+
+    def test_relative_move_advances_known_pointer(self) -> None:
+        session, context = self._context_with_humanize(mouse_curve=True)
+        context.pointer = (10, 10)
+
+        execute_action(
+            MouseMoveStep(
+                id="move",
+                name="Move",
+                move_mode="relative",
+                delta_x=5,
+                delta_y=-3,
+            ),
+            context,
+        )
+
+        self.assertEqual(session.controller.calls, [("relative_move", 5, -3)])
+        self.assertEqual(context.pointer, (15, 7))
+
+    def test_direct_input_receives_humanized_hold_and_curve(self) -> None:
+        session, context = self._context_with_humanize(mouse_curve=True)
+        session.config["controller"]["direct_screen_input"] = True
+        session.window = WindowInfo(
+            hwnd=123,
+            title="Application",
+            class_name="UnrealWindow",
+            window_width=1920,
+            window_height=1080,
+            client_width=1920,
+            client_height=1080,
+            visible=True,
+            minimized=False,
+        )
+
+        with patch("window_auto.workflow.actions.click_client_point") as direct_click:
+            execute_action(
+                MouseClickStep(id="click", name="Click", x=100, y=100),
+                context,
+            )
+
+        (window, point, button), kwargs = direct_click.call_args
+        self.assertIs(window, session.window)
+        self.assertEqual(point, (100, 100))
+        self.assertEqual(button, "left")
+        self.assertGreaterEqual(kwargs["hold_seconds"], 0.04)
+        self.assertLessEqual(kwargs["hold_seconds"], 0.12)
+        self.assertTrue(kwargs["move_curve"])
+
+
+class WorkflowV2EngineHumanizeTests(unittest.TestCase):
+    def test_pointer_is_carried_across_steps(self) -> None:
+        session = _Session()
+        session.config = {
+            "controller": {
+                "humanize": {
+                    "enabled": True,
+                    "click_jitter_px": 0,
+                    "timing_jitter_ratio": 0.0,
+                    "mouse_curve": True,
+                }
+            }
+        }
+        definition = WorkflowDefinition(
+            name="humanized",
+            steps=(
+                MouseMoveStep(id="move", name="Move", x=10, y=20),
+                MouseClickStep(id="click", name="Click", x=200, y=20),
+            ),
+        )
+
+        result = WorkflowEngine().run(definition, session)
+
+        self.assertTrue(all(step.succeeded for step in result.steps))
+        calls = session.controller.calls
+        self.assertEqual(calls[0], ("move", 10, 20))
+        self.assertEqual(calls[-1], ("click", 200, 20, 0))
+        approach = calls[1:-1]
+        self.assertGreater(len(approach), 1)
+        self.assertTrue(all(call[0] == "move" for call in approach))
+
+
 class WorkflowV2EngineTests(unittest.TestCase):
     def test_engine_emits_events_and_runs_steps_in_order(self) -> None:
         session = _Session()
@@ -1101,6 +1314,315 @@ class AutoDelayEngineTests(unittest.TestCase):
 
         self.assertIsInstance(engine._AUTO_DELAY_RANDOM, random.SystemRandom)
         self.assertIsInstance(actions._WAIT_RANDOM, random.SystemRandom)
+
+
+def _write_workflow_file(
+    root: Path,
+    filename: str,
+    steps: list[dict],
+    *,
+    name: str = "workflow",
+    settings: dict | None = None,
+) -> Path:
+    data: dict = {"version": 2, "name": name, "steps": steps}
+    if settings is not None:
+        data["settings"] = settings
+    path = root / filename
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _run_workflow_step(step_id: str, workflow: str, **extra) -> dict:
+    return {
+        "id": step_id,
+        "type": "run_workflow",
+        "name": step_id,
+        "workflow": workflow,
+        **extra,
+    }
+
+
+class RunWorkflowLoaderTests(unittest.TestCase):
+    def test_run_workflow_step_is_loaded(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write_workflow_file(
+                root,
+                "child.json",
+                [{"id": "w", "type": "wait", "name": "W", "duration_ms": 1}],
+            )
+            path = _write_workflow_file(
+                root, "parent.json", [_run_workflow_step("run", "child.json")]
+            )
+
+            definition = load_workflow_v2(path, root)
+
+            step = definition.steps[0]
+            self.assertIsInstance(step, RunWorkflowStep)
+            self.assertEqual(step.workflow_path, (root / "child.json").resolve())
+
+    def test_run_workflow_prefers_the_workflow_directory(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow_dir = root / "workflow"
+            workflow_dir.mkdir()
+            _write_workflow_file(
+                workflow_dir,
+                "child.json",
+                [{"id": "w", "type": "wait", "name": "W", "duration_ms": 1}],
+            )
+            path = _write_workflow_file(
+                root, "parent.json", [_run_workflow_step("run", "child.json")]
+            )
+
+            with patch(
+                "window_auto.workflow.loader.workflow_dir", return_value=workflow_dir
+            ):
+                definition = load_workflow_v2(path, root)
+
+            self.assertEqual(
+                definition.steps[0].workflow_path,
+                (workflow_dir / "child.json").resolve(),
+            )
+
+    def test_run_workflow_requires_an_existing_file(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = _write_workflow_file(
+                root, "parent.json", [_run_workflow_step("run", "missing.json")]
+            )
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "does not exist"):
+                load_workflow_v2(path, root)
+
+    def test_run_workflow_rejects_unknown_fields(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = _write_workflow_file(
+                root,
+                "parent.json",
+                [_run_workflow_step("run", "child.json", timeout_ms=5)],
+            )
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "Unknown"):
+                load_workflow_v2(path, root)
+
+    def test_run_workflow_rejects_retry_failure_policy(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = _write_workflow_file(
+                root,
+                "parent.json",
+                [_run_workflow_step("run", "child.json", on_failure="retry")],
+            )
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "on_failure"):
+                load_workflow_v2(path, root)
+
+    def test_run_workflow_rejects_direct_self_reference(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = _write_workflow_file(
+                root, "parent.json", [_run_workflow_step("run", "parent.json")]
+            )
+
+            with self.assertRaisesRegex(WorkflowV2ConfigError, "itself"):
+                load_workflow_v2(path, root)
+
+
+class RunWorkflowEngineTests(unittest.TestCase):
+    def _write_child_click(self, root: Path, filename: str = "child.json") -> Path:
+        return _write_workflow_file(
+            root,
+            filename,
+            [{"id": "click", "type": "mouse_click", "name": "Click", "x": 7, "y": 9}],
+            name="child",
+        )
+
+    def test_sub_workflow_steps_run_inline(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_child_click(root)
+            parent_path = _write_workflow_file(
+                root,
+                "parent.json",
+                [
+                    {"id": "w", "type": "wait", "name": "W", "duration_ms": 1},
+                    _run_workflow_step("run", "child.json"),
+                ],
+                name="parent",
+            )
+            session = _Session()
+            events = []
+            definition = load_workflow_v2(parent_path, root)
+
+            result = WorkflowEngine(events.append).run(definition, session)
+
+            self.assertIn(("click", 7, 9, 0), session.controller.calls)
+            self.assertTrue(result.steps[-1].succeeded)
+            self.assertIn("子工作流", result.steps[-1].output)
+            started_names = [
+                event.workflow_name
+                for event in events
+                if event.type == WorkflowEventType.WORKFLOW_STARTED
+            ]
+            self.assertEqual(started_names, ["parent", "child"])
+
+    def test_variables_are_shared_with_sub_workflow(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            child_path = _write_workflow_file(
+                root,
+                "child.json",
+                [{"id": "key", "type": "key_press", "name": "Key", "key": "ENTER"}],
+            )
+            observed: list[bool] = []
+
+            def fake_action(step, context):
+                if step.kind == "text_input":
+                    context.variables["shared"] = "yes"
+                if step.kind == "key_press":
+                    observed.append("shared" in context.variables)
+                return ActionResult(None)
+
+            definition = WorkflowDefinition(
+                name="parent",
+                steps=(
+                    TextInputStep(id="type", name="Type", text="abc"),
+                    RunWorkflowStep(id="run", name="Run", workflow_path=child_path),
+                ),
+            )
+
+            with patch(
+                "window_auto.workflow.engine.execute_action", side_effect=fake_action
+            ):
+                result = WorkflowEngine().run(definition, _Session())
+
+            self.assertEqual(observed, [True])
+            self.assertTrue(all(step.succeeded for step in result.steps))
+
+    def test_sub_workflow_failure_raises_with_stop_policy(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_child_click(root)
+            parent_path = _write_workflow_file(
+                root, "parent.json", [_run_workflow_step("run", "child.json")]
+            )
+            session = _Session()
+            session.controller.fail_click = True
+            definition = load_workflow_v2(parent_path, root)
+
+            with self.assertRaises(WorkflowExecutionError):
+                WorkflowEngine().run(definition, session)
+
+    def test_parent_continue_policy_survives_sub_workflow_failure(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_child_click(root)
+            parent_path = _write_workflow_file(
+                root,
+                "parent.json",
+                [
+                    _run_workflow_step("run", "child.json", on_failure="continue"),
+                    {"id": "after", "type": "wait", "name": "W", "duration_ms": 1},
+                ],
+            )
+            session = _Session()
+            session.controller.fail_click = True
+            definition = load_workflow_v2(parent_path, root)
+
+            result = WorkflowEngine().run(definition, session)
+
+            self.assertFalse(result.steps[0].succeeded)
+            self.assertTrue(result.steps[1].succeeded)
+
+    def test_circular_sub_workflow_references_are_rejected(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write_workflow_file(
+                root, "a.json", [_run_workflow_step("run-b", "b.json")], name="A"
+            )
+            _write_workflow_file(
+                root, "b.json", [_run_workflow_step("run-a", "a.json")], name="B"
+            )
+            definition = load_workflow_v2(root / "a.json", root)
+
+            with self.assertRaisesRegex(WorkflowExecutionError, "循环调用"):
+                WorkflowEngine().run(definition, _Session())
+
+    def test_nesting_depth_limit_is_enforced(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write_workflow_file(
+                root,
+                "f4.json",
+                [{"id": "w", "type": "wait", "name": "W", "duration_ms": 1}],
+            )
+            for index in (3, 2, 1):
+                _write_workflow_file(
+                    root,
+                    f"f{index}.json",
+                    [_run_workflow_step("run", f"f{index + 1}.json")],
+                )
+            definition = WorkflowDefinition(
+                name="parent",
+                steps=(
+                    RunWorkflowStep(
+                        id="run",
+                        name="Run",
+                        workflow_path=(root / "f1.json").resolve(),
+                    ),
+                ),
+            )
+
+            with patch("window_auto.workflow.engine.MAX_SUB_WORKFLOW_DEPTH", 3):
+                with self.assertRaisesRegex(WorkflowExecutionError, "上限"):
+                    WorkflowEngine().run(definition, _Session())
+
+    def test_sub_workflow_step_is_exempt_from_parent_timeout(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write_workflow_file(
+                root,
+                "child.json",
+                [{"id": "w", "type": "wait", "name": "W", "duration_ms": 250}],
+            )
+            parent_path = _write_workflow_file(
+                root,
+                "parent.json",
+                [_run_workflow_step("run", "child.json")],
+                settings={"default_timeout_ms": 100},
+            )
+            definition = load_workflow_v2(parent_path, root)
+
+            started = time.perf_counter()
+            result = WorkflowEngine().run(definition, _Session())
+            elapsed = time.perf_counter() - started
+
+            self.assertTrue(result.steps[0].succeeded)
+            self.assertGreaterEqual(elapsed, 0.2)
+
+    def test_cancellation_propagates_into_sub_workflow(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write_workflow_file(
+                root,
+                "child.json",
+                [{"id": "w", "type": "wait", "name": "W", "duration_ms": 5000}],
+            )
+            parent_path = _write_workflow_file(
+                root, "parent.json", [_run_workflow_step("run", "child.json")]
+            )
+            definition = load_workflow_v2(parent_path, root)
+            token = CancellationToken()
+            threading.Timer(0.1, token.cancel).start()
+
+            started = time.perf_counter()
+            result = WorkflowEngine().run(definition, _Session(), token)
+            elapsed = time.perf_counter() - started
+
+            self.assertTrue(result.cancelled)
+            self.assertLess(elapsed, 2.0)
 
 
 if __name__ == "__main__":
