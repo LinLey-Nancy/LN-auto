@@ -21,7 +21,7 @@ def _build_request(url: str, timeout_ms: int) -> QNetworkRequest:
     request.setRawHeader(b"Accept", b"application/vnd.github+json")
     request.setAttribute(
         QNetworkRequest.Attribute.RedirectPolicyAttribute,
-        QNetworkRequest.RedirectPolicyAttribute.NoLessSafeRedirectPolicy,
+        QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
     )
     request.setTransferTimeout(timeout_ms)
     return request

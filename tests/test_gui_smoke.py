@@ -513,6 +513,17 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertGreater(calls_after_typing, calls_after_init)
         self.assertGreater(calls_after_toggle, calls_after_typing)
+    def test_update_request_uses_valid_redirect_policy(self) -> None:
+        from PySide6.QtNetwork import QNetworkRequest
+        from window_auto.gui.update_checker import _build_request
+
+        request = _build_request("https://api.github.com/example", 1000)
+
+        self.assertEqual(
+            request.attribute(QNetworkRequest.Attribute.RedirectPolicyAttribute),
+            QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
+        )
+        self.assertEqual(request.transferTimeout(), 1000)
 
 
 if __name__ == "__main__":
