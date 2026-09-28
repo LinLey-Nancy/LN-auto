@@ -513,6 +513,53 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertGreater(calls_after_typing, calls_after_init)
         self.assertGreater(calls_after_toggle, calls_after_typing)
+    def test_screencap_mode_combo_defaults_and_persists(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings_path = str(Path(directory) / "settings.ini")
+
+            def make_settings() -> QSettings:
+                return QSettings(settings_path, QSettings.Format.IniFormat)
+
+            with patch(
+                "window_auto.gui.main_window.QSettings", side_effect=make_settings
+            ):
+                window = MainWindow()
+
+                values = [
+                    window.screencap_combo.itemData(index)
+                    for index in range(window.screencap_combo.count())
+                ]
+                self.assertEqual(values, ["background", "foreground"])
+                self.assertEqual(window.screencap_combo.currentData(), "background")
+
+                window.screencap_combo.setCurrentIndex(
+                    window.screencap_combo.findData("foreground")
+                )
+                self.assertEqual(
+                    make_settings().value("run/screencap_mode"), "foreground"
+                )
+
+                rebuilt = MainWindow()
+                self.assertEqual(rebuilt.screencap_combo.currentData(), "foreground")
+
+                rebuilt.document.dirty = False
+                rebuilt.close()
+                window.document.dirty = False
+                window.close()
+
+    def test_apply_screencap_mode_overrides_controller_config(self) -> None:
+        window = MainWindow()
+        config = {"controller": {"screencap_mode": "background"}}
+
+        window.screencap_combo.setCurrentIndex(
+            window.screencap_combo.findData("foreground")
+        )
+        window._apply_screencap_mode(config)
+
+        self.assertEqual(config["controller"]["screencap_mode"], "foreground")
+        window.document.dirty = False
+        window.close()
+
     def test_update_request_uses_valid_redirect_policy(self) -> None:
         from PySide6.QtNetwork import QNetworkRequest
         from window_auto.gui.update_checker import _build_request

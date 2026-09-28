@@ -1,6 +1,6 @@
 # LN-auto 项目状态与路线图
 
-更新时间：2026-09-27
+更新时间：2026-09-28
 
 ## 项目目标
 
@@ -13,6 +13,10 @@ LN-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终�
 - 工作流保存、加载、调试与发布
 
 项目以“输入发送成功不等于目标应用已经处理输入”为安全原则。正式流程应通过模板、截图变化或其他可观测状态验证操作结果。
+
+## 2026-09-28 更新内容
+
+- 主工具栏新增「截图方式」下拉（输入策略右侧）：「窗口截图（可被遮挡）」对应 `controller.screencap_mode = background`（FramePool+PrintWindow，现状默认），「全屏截图（屏幕级，窗口须可见）」对应 `foreground`（DXGI_DesktopDup_Window+ScreenDC，屏幕级截取、不直接与目标窗口交互）。动机：FramePool 会对游戏窗口建立 Windows.Graphics.Capture 捕获会话、PrintWindow 会向目标窗口发 WM_PRINT，均是反作弊的主要检测面；屏幕级截图等价于普通截屏工具，不触碰目标窗口。选择经 QSettings `run/screencap_mode` 持久化（默认 background），`run_workflow` 加载配置后按选择覆盖 `screencap_mode`，运行确认对话框同步显示所选截图方式。CLI 行为不变（仍读 `config/default.json`）。取舍：全屏截图要求目标窗口可见且不被遮挡。
 
 ## 2026-09-27 更新内容
 

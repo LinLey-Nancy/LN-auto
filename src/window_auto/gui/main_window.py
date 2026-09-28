@@ -217,6 +217,24 @@ class MainWindow(QMainWindow):
         )
         toolbar.addWidget(self.profile_combo)
 
+        toolbar.addWidget(QLabel("截图方式："))
+        self.screencap_combo = QComboBox()
+        self.screencap_combo.addItem("窗口截图（可被遮挡）", "background")
+        self.screencap_combo.addItem("全屏截图（屏幕级，窗口须可见）", "foreground")
+        self.screencap_combo.setToolTip(
+            "窗口截图：支持后台和被遮挡的窗口，但会直接读取目标窗口画面。\n"
+            "全屏截图：从整个屏幕截取，不直接触碰目标窗口（更不易被检测），"
+            "但要求目标窗口可见且不被遮挡。"
+        )
+        saved_mode = self._update_settings().value(
+            "run/screencap_mode", "background", type=str
+        )
+        saved_index = self.screencap_combo.findData(saved_mode)
+        if saved_index >= 0:
+            self.screencap_combo.setCurrentIndex(saved_index)
+        self.screencap_combo.currentIndexChanged.connect(self._save_screencap_mode)
+        toolbar.addWidget(self.screencap_combo)
+
         spacer = QWidget()
         spacer.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -655,6 +673,7 @@ class MainWindow(QMainWindow):
         try:
             definition = load_workflow_v2(self.document.path, PROJECT_ROOT)
             config = load_config(DEFAULT_CONFIG_PATH)
+            self._apply_screencap_mode(config)
         except (WorkflowV2ConfigError, OSError, ValueError) as error:
             QMessageBox.critical(self, "工作流无法运行", str(error))
             return
@@ -662,7 +681,8 @@ class MainWindow(QMainWindow):
         profile = self.profile_combo.currentData()
         warning = (
             f"目标：{self.selected_window.title}\n"
-            f"输入策略：{self.profile_combo.currentText()}\n\n"
+            f"输入策略：{self.profile_combo.currentText()}\n"
+            f"截图方式：{self.screencap_combo.currentText()}\n\n"
             f"{profile.warning}\n\n"
             "运行期间可能发送鼠标和键盘输入。是否继续？"
         )
@@ -714,6 +734,14 @@ class MainWindow(QMainWindow):
 
     def _update_settings(self) -> QSettings:
         return QSettings()
+
+    def _save_screencap_mode(self) -> None:
+        self._update_settings().setValue(
+            "run/screencap_mode", self.screencap_combo.currentData()
+        )
+
+    def _apply_screencap_mode(self, config: dict) -> None:
+        config["controller"]["screencap_mode"] = self.screencap_combo.currentData()
 
     def _auto_check_enabled(self) -> bool:
         return bool(
