@@ -2,7 +2,15 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
-from window_auto.application.input_profiles import InputProfileName, get_input_profile
+from window_auto.application.input_profiles import (
+    InputProfileName,
+    RunMode,
+    default_input_profile,
+    get_input_profile,
+    mode_controller_overrides,
+    mode_input_profiles,
+    parse_run_mode,
+)
 from window_auto.application.session import AutomationSession
 from window_auto.application.window_service import WindowQuery, choose_window, list_windows
 from window_auto.diagnostics.workspace import DebugWorkspace
@@ -95,6 +103,52 @@ class InputProfileTests(unittest.TestCase):
         self.assertEqual(profile.keyboard_method, "Seize")
         self.assertFalse(profile.supports_background)
         self.assertTrue(profile.direct_screen_input)
+
+
+class RunModeTests(unittest.TestCase):
+    def test_parse_run_mode_falls_back_to_window(self) -> None:
+        self.assertEqual(parse_run_mode("fullscreen"), RunMode.FULLSCREEN)
+        self.assertEqual(parse_run_mode("garbage"), RunMode.WINDOW)
+        self.assertEqual(parse_run_mode(None), RunMode.WINDOW)
+
+    def test_window_mode_offers_all_profiles(self) -> None:
+        profiles = mode_input_profiles(RunMode.WINDOW)
+
+        self.assertEqual(len(profiles), 5)
+        self.assertIn(InputProfileName.BACKGROUND_MESSAGE, profiles)
+        self.assertEqual(
+            default_input_profile(RunMode.WINDOW), InputProfileName.FOREGROUND_PRECISE
+        )
+
+    def test_fullscreen_mode_only_offers_foreground_profiles(self) -> None:
+        profiles = mode_input_profiles(RunMode.FULLSCREEN)
+
+        self.assertEqual(
+            list(profiles),
+            [InputProfileName.FOREGROUND_COMPATIBLE, InputProfileName.DRIVER_INTERCEPTION],
+        )
+        for name in profiles:
+            self.assertFalse(get_input_profile(name).supports_background)
+            self.assertFalse(get_input_profile(name).direct_screen_input)
+        self.assertEqual(
+            default_input_profile(RunMode.FULLSCREEN),
+            InputProfileName.FOREGROUND_COMPATIBLE,
+        )
+
+    def test_window_mode_overrides_use_window_scope(self) -> None:
+        overrides = mode_controller_overrides(RunMode.WINDOW)
+
+        self.assertEqual(overrides["screencap_mode"], "background")
+        self.assertEqual(overrides["capture_scope"], "window")
+
+    def test_fullscreen_mode_overrides_use_screen_level_capture(self) -> None:
+        overrides = mode_controller_overrides(RunMode.FULLSCREEN)
+
+        self.assertEqual(overrides["screencap_mode"], "foreground")
+        self.assertEqual(overrides["capture_scope"], "desktop")
+        self.assertEqual(
+            overrides["foreground_screencap"], ["DXGI_DesktopDup", "ScreenDC"]
+        )
 
 
 class AutomationSessionTests(unittest.TestCase):

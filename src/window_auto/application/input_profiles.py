@@ -14,6 +14,74 @@ class InputProfileName(StrEnum):
     DRIVER_INTERCEPTION = "driver-interception"
 
 
+class RunMode(StrEnum):
+    WINDOW = "window"
+    FULLSCREEN = "fullscreen"
+
+
+MODE_LABELS = {
+    RunMode.WINDOW: "窗口模式（办公自动化）",
+    RunMode.FULLSCREEN: "全屏模式（游戏防检测）",
+}
+
+MODE_DESCRIPTIONS = {
+    RunMode.WINDOW: (
+        "选择一个目标窗口后运行；支持窗口级截图与后台输入，"
+        "运行期间不占用物理鼠标键盘。"
+    ),
+    RunMode.FULLSCREEN: (
+        "对整个屏幕截图并使用前台输入，不与游戏窗口直接交互，"
+        "降低被反作弊检测的风险；无需选择窗口，运行期间会占用物理鼠标键盘。"
+    ),
+}
+
+MODE_SCREENCAP_LABELS = {
+    RunMode.WINDOW: "窗口截图（窗口级，可被遮挡，可后台）",
+    RunMode.FULLSCREEN: "全屏截图（屏幕级，不与窗口直接交互）",
+}
+
+_MODE_PROFILES = {
+    RunMode.WINDOW: tuple(InputProfileName),
+    RunMode.FULLSCREEN: (
+        InputProfileName.FOREGROUND_COMPATIBLE,
+        InputProfileName.DRIVER_INTERCEPTION,
+    ),
+}
+
+_MODE_DEFAULT_PROFILE = {
+    RunMode.WINDOW: InputProfileName.FOREGROUND_PRECISE,
+    RunMode.FULLSCREEN: InputProfileName.FOREGROUND_COMPATIBLE,
+}
+
+
+def parse_run_mode(value: object) -> RunMode:
+    try:
+        return RunMode(str(value))
+    except ValueError:
+        return RunMode.WINDOW
+
+
+def mode_input_profiles(mode: RunMode) -> tuple[InputProfileName, ...]:
+    return _MODE_PROFILES[parse_run_mode(mode)]
+
+
+def default_input_profile(mode: RunMode) -> InputProfileName:
+    return _MODE_DEFAULT_PROFILE[parse_run_mode(mode)]
+
+
+def mode_controller_overrides(mode: RunMode) -> dict[str, object]:
+    if parse_run_mode(mode) is RunMode.FULLSCREEN:
+        return {
+            "screencap_mode": "foreground",
+            "capture_scope": "desktop",
+            "foreground_screencap": ["DXGI_DesktopDup", "ScreenDC"],
+        }
+    return {
+        "screencap_mode": "background",
+        "capture_scope": "window",
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class InputProfile:
     name: InputProfileName
@@ -40,7 +108,7 @@ INPUT_PROFILES = {
         requires_external_driver=False,
         compatibility="medium",
         warning=(
-            "后台消息可能显示发送成功，但目标程序仍可能忽略模拟输入；"
+            "仅窗口模式可用。后台消息可能显示发送成功，但目标程序仍可能忽略模拟输入；"
             "请通过画面变化确认操作是否真正生效。"
         ),
     ),
@@ -55,7 +123,7 @@ INPUT_PROFILES = {
         requires_external_driver=False,
         compatibility="high",
         warning=(
-            "向选中的目标窗口发送后台消息，并启用 MaaFramework 鼠标锁定跟随；"
+            "仅窗口模式可用。向选中的目标窗口发送后台消息，并启用 MaaFramework 鼠标锁定跟随；"
             "仅适用于已经确认接受后台消息的目标程序。"
         ),
     ),
@@ -70,7 +138,7 @@ INPUT_PROFILES = {
         requires_external_driver=False,
         compatibility="high",
         warning=(
-            "将恢复并置顶目标窗口，把客户区坐标直接换算为屏幕像素，"
+            "仅窗口模式可用。将恢复并置顶目标窗口，把客户区坐标直接换算为屏幕像素，"
             "并短暂占用物理鼠标。自动化程序权限必须与目标程序相同。"
         ),
     ),
@@ -85,7 +153,8 @@ INPUT_PROFILES = {
         requires_external_driver=False,
         compatibility="high",
         warning=(
-            "目标窗口必须位于前台，运行期间可能短暂占用物理鼠标和键盘。"
+            "窗口模式和全屏模式均可使用，是全屏模式（游戏）的推荐策略。"
+            "目标画面必须位于前台且不被遮挡，运行期间可能短暂占用物理鼠标和键盘。"
         ),
     ),
     InputProfileName.DRIVER_INTERCEPTION: InputProfile(

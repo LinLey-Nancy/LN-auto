@@ -33,20 +33,34 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from window_auto.application.input_profiles import INPUT_PROFILES, InputProfileName
+from window_auto.application.input_profiles import (
+    MODE_LABELS,
+    MODE_SCREENCAP_LABELS,
+    InputProfileName,
+    RunMode,
+    default_input_profile,
+    get_input_profile,
+    mode_controller_overrides,
+    mode_input_profiles,
+    parse_run_mode,
+)
 from window_auto.config.loader import MAX_TIME_MS, load_config
 from window_auto.diagnostics.workspace import create_debug_workspace
 from window_auto.gui.document import STEP_LABELS, WorkflowDocument
 from window_auto.gui.property_editor import PropertyEditor
+from window_auto.gui.run_settings_dialog import PROFILE_LABELS, RunSettingsDialog
 from window_auto.gui.step_list import StepItemDelegate, summarize_step
 from window_auto.gui.template_creator import TemplateCreationDialog
 from window_auto.gui.update_checker import UpdateChecker, UpdateDownloader
-from window_auto.gui.window_dialog import WindowSelectorDialog
 from window_auto.gui.worker import WorkflowWorker
 from window_auto.paths import project_root, workflow_dir
 from window_auto.update import RELEASES_PAGE_URL, ReleaseInfo
 from window_auto.version import current_version
-from window_auto.windowing.discovery import WindowInfo
+from window_auto.windowing.discovery import (
+    WindowInfo,
+    desktop_window_info,
+    live_client_origin,
+)
 from window_auto.workflow.events import WorkflowEvent, WorkflowEventType
 from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
 
@@ -113,6 +127,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.document = WorkflowDocument()
         self.selected_window: WindowInfo | None = None
+        self.target_mode = parse_run_mode(
+            self._update_settings().value("run/target_mode", RunMode.WINDOW.value)
+        )
+        self.input_profile_name = self._load_input_profile()
         self._thread: QThread | None = None
         self._worker: WorkflowWorker | None = None
         self.setWindowTitle("LN-auto 工作流编辑器")
@@ -128,6 +146,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("就绪")
         self.mouse_position_label = QLabel()
         self.mouse_position_label.setObjectName("mutedLabel")
+        self.mouse_position_label.setToolTip(
+            "窗口模式下显示所选窗口内的坐标（可直接填入步骤）；"
+            "全屏模式或未选择窗口时显示屏幕坐标。"
+        )
         self.statusBar().addPermanentWidget(self.mouse_position_label)
         self._mouse_timer = QTimer(self)
         self._mouse_timer.setInterval(100)
@@ -145,7 +167,15 @@ class MainWindow(QMainWindow):
 
     def _update_mouse_position(self) -> None:
         position = QCursor.pos()
-        self.mouse_position_label.setText(f"鼠标 X: {position.x()}  Y: {position.y()}")
+        if self.target_mode is RunMode.WINDOW and self.selected_window is not None:
+            origin = live_client_origin(self.selected_window.hwnd)
+            if origin is not None:
+                self.mouse_position_label.setText(
+                    f"窗口内 X: {position.x() - origin[0]}"
+                    f"  Y: {position.y() - origin[1]}"
+                )
+                return
+        self.mouse_position_label.setText(f"屏幕 X: {position.x()}  Y: {position.y()}")
 
     def _build_actions(self) -> None:
         self.new_action = QAction("新建", self)
@@ -160,6 +190,24 @@ class MainWindow(QMainWindow):
         self.save_as_action = QAction("另存为", self)
         self.save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
         self.save_as_action.triggered.connect(lambda: self.save_document(save_as=True))
+        self.run_settings_action = QAction("运行设置…", self)
+        self.run_settings_action.triggered.connect(self.open_run_settings)
+        self.run_action = QAction("运行工作流", self)
+        self.run_action.setShortcut(QKeySequence("F5"))
+        self.run_action.triggered.connect(self.run_workflow)
+        self.stop_action = QAction("停止", self)
+        self.stop_action.setEnabled(False)
+        self.stop_action.triggered.connect(self.stop_workflow)
+
+    def _load_input_profile(self) -> InputProfileName:
+        stored = self._update_settings().value("run/input_profile", "", type=str)
+        try:
+            profile = InputProfileName(stored)
+        except ValueError:
+            return default_input_profile(self.target_mode)
+        if profile not in mode_input_profiles(self.target_mode):
+            return default_input_profile(self.target_mode)
+        return profile
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("文件(&F)")
@@ -167,6 +215,12 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.open_action)
         file_menu.addAction(self.save_action)
         file_menu.addAction(self.save_as_action)
+
+        run_menu = self.menuBar().addMenu("运行(&R)")
+        run_menu.addAction(self.run_settings_action)
+        run_menu.addSeparator()
+        run_menu.addAction(self.run_action)
+        run_menu.addAction(self.stop_action)
 
         help_menu = self.menuBar().addMenu("帮助(&H)")
         self.check_updates_action = QAction("检查更新…", self)
@@ -190,50 +244,13 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.save_action)
         toolbar.addSeparator()
 
-        self.target_label = QLabel("未选择目标窗口")
-        self.target_label.setObjectName("mutedLabel")
-        self.target_label.setMinimumWidth(280)
-        select_window = QPushButton("选择窗口")
-        select_window.clicked.connect(self.choose_window)
-        toolbar.addWidget(self.target_label)
-        toolbar.addWidget(select_window)
-        toolbar.addSeparator()
-
-        toolbar.addWidget(QLabel("输入策略："))
-        self.profile_combo = QComboBox()
-        for name, profile in INPUT_PROFILES.items():
-            label = {
-                InputProfileName.BACKGROUND_MESSAGE: "后台消息（兼容性中）",
-                InputProfileName.BACKGROUND_WINDOW_MESSAGE: "窗口后台消息（目标需支持）",
-                InputProfileName.FOREGROUND_PRECISE: "前台精确点击（推荐）",
-                InputProfileName.FOREGROUND_COMPATIBLE: "前台兼容（需窗口置顶）",
-                InputProfileName.DRIVER_INTERCEPTION: "驱动级（需管理员）",
-            }[name]
-            self.profile_combo.addItem(label, profile)
-        self.profile_combo.setCurrentIndex(
-            self.profile_combo.findData(
-                INPUT_PROFILES[InputProfileName.FOREGROUND_PRECISE]
-            )
+        self.target_summary_label = QLabel()
+        self.target_summary_label.setObjectName("mutedLabel")
+        self.target_summary_label.setToolTip(
+            "通过菜单「运行 → 运行设置…」修改目标模式、目标窗口和输入策略。"
         )
-        toolbar.addWidget(self.profile_combo)
-
-        toolbar.addWidget(QLabel("截图方式："))
-        self.screencap_combo = QComboBox()
-        self.screencap_combo.addItem("窗口截图（可被遮挡）", "background")
-        self.screencap_combo.addItem("全屏截图（屏幕级，窗口须可见）", "foreground")
-        self.screencap_combo.setToolTip(
-            "窗口截图：支持后台和被遮挡的窗口，但会直接读取目标窗口画面。\n"
-            "全屏截图：从整个屏幕截取，不直接触碰目标窗口（更不易被检测），"
-            "但要求目标窗口可见且不被遮挡。"
-        )
-        saved_mode = self._update_settings().value(
-            "run/screencap_mode", "background", type=str
-        )
-        saved_index = self.screencap_combo.findData(saved_mode)
-        if saved_index >= 0:
-            self.screencap_combo.setCurrentIndex(saved_index)
-        self.screencap_combo.currentIndexChanged.connect(self._save_screencap_mode)
-        toolbar.addWidget(self.screencap_combo)
+        toolbar.addWidget(self.target_summary_label)
+        self._refresh_target_summary()
 
         spacer = QWidget()
         spacer.setSizePolicy(
@@ -251,6 +268,52 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.stop_button)
         toolbar.addWidget(self.run_button)
         self.addToolBar(toolbar)
+
+    def _refresh_target_summary(self) -> None:
+        if self.target_mode is RunMode.FULLSCREEN:
+            text = "目标：全屏模式 · 整个屏幕"
+        elif self.selected_window is None:
+            text = "目标：窗口模式 · 未选择窗口"
+        else:
+            window = self.selected_window
+            text = f"目标：{window.title} · {window.class_name}"
+        self.target_summary_label.setText(text)
+
+    def open_run_settings(self) -> None:
+        if self._thread is not None:
+            QMessageBox.information(
+                self,
+                "工作流正在运行",
+                "请先停止工作流，再修改运行设置。",
+            )
+            return
+        dialog = RunSettingsDialog(
+            self.target_mode,
+            self.selected_window,
+            self.input_profile_name,
+            self,
+        )
+        if not dialog.exec():
+            return
+        self.target_mode = dialog.result_mode
+        self.input_profile_name = dialog.result_profile
+        if (
+            dialog.selected_window is not None
+            and dialog.selected_window is not self.selected_window
+        ):
+            self.selected_window = dialog.selected_window
+            self.document.set_target(
+                self.selected_window.title,
+                self.selected_window.class_name,
+            )
+            self._update_title()
+        self._persist_run_settings()
+        self._refresh_target_summary()
+
+    def _persist_run_settings(self) -> None:
+        settings = self._update_settings()
+        settings.setValue("run/target_mode", self.target_mode.value)
+        settings.setValue("run/input_profile", self.input_profile_name.value)
 
     def _build_central(self) -> None:
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -595,8 +658,7 @@ class MainWindow(QMainWindow):
             return
         self.document = WorkflowDocument()
         self.selected_window = None
-        self.target_label.setText("未选择目标窗口")
-        self.target_label.setToolTip("")
+        self._refresh_target_summary()
         self._refresh_document()
 
     def open_document(self) -> None:
@@ -616,8 +678,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "无法打开工作流", str(error))
             return
         self.selected_window = None
-        self.target_label.setText("未选择目标窗口")
-        self.target_label.setToolTip("")
+        self._refresh_target_summary()
         self._refresh_document(0)
         self.statusBar().showMessage(f"已打开 {filename}", 4000)
 
@@ -649,40 +710,42 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"已保存 {saved}", 4000)
         return True
 
-    def choose_window(self) -> None:
-        dialog = WindowSelectorDialog(self)
-        if dialog.exec() and dialog.selected_window is not None:
-            self.selected_window = dialog.selected_window
-            window = dialog.selected_window
-            self.target_label.setText(f"{window.title}  ·  {window.class_name}")
-            self.target_label.setToolTip(
-                f"HWND 0x{window.hwnd:X} · 客户区 {window.client_width}×{window.client_height}"
-            )
-            self.document.set_target(window.title, window.class_name)
-            self._update_title()
-
     def run_workflow(self) -> None:
         if self._thread is not None:
             return
-        if self.selected_window is None:
-            QMessageBox.information(self, "尚未选择窗口", "请先选择唯一的目标窗口。")
-            return
+        if self.target_mode is RunMode.WINDOW:
+            if self.selected_window is None:
+                QMessageBox.information(
+                    self,
+                    "尚未选择窗口",
+                    "窗口模式需要选择唯一的目标窗口。\n"
+                    "请通过菜单「运行 → 运行设置…」选择目标窗口。",
+                )
+                return
+            window = self.selected_window
+        else:
+            try:
+                window = desktop_window_info()
+            except RuntimeError as error:
+                QMessageBox.critical(self, "无法进入全屏模式", str(error))
+                return
         if self.document.dirty or self.document.path is None:
             if not self.save_document():
                 return
         try:
             definition = load_workflow_v2(self.document.path, PROJECT_ROOT)
             config = load_config(DEFAULT_CONFIG_PATH)
-            self._apply_screencap_mode(config)
+            self._apply_mode_overrides(config)
         except (WorkflowV2ConfigError, OSError, ValueError) as error:
             QMessageBox.critical(self, "工作流无法运行", str(error))
             return
 
-        profile = self.profile_combo.currentData()
+        profile = get_input_profile(self.input_profile_name)
         warning = (
-            f"目标：{self.selected_window.title}\n"
-            f"输入策略：{self.profile_combo.currentText()}\n"
-            f"截图方式：{self.screencap_combo.currentText()}\n\n"
+            f"模式：{MODE_LABELS[self.target_mode]}\n"
+            f"目标：{window.title}\n"
+            f"输入策略：{PROFILE_LABELS[self.input_profile_name]}\n"
+            f"截图方式：{MODE_SCREENCAP_LABELS[self.target_mode]}\n\n"
             f"{profile.warning}\n\n"
             "运行期间可能发送鼠标和键盘输入。是否继续？"
         )
@@ -705,7 +768,7 @@ class MainWindow(QMainWindow):
         self._thread = QThread(self)
         self._worker = WorkflowWorker(
             definition,
-            self.selected_window,
+            window,
             config,
             PROJECT_ROOT,
             workspace,
@@ -721,6 +784,9 @@ class MainWindow(QMainWindow):
         self._thread.finished.connect(self._clear_worker)
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
+        self.run_action.setEnabled(False)
+        self.stop_action.setEnabled(True)
+        self.run_settings_action.setEnabled(False)
         self.statusBar().showMessage("工作流运行中…")
         self.append_log(f"开始运行：{definition.name}")
         self._thread.start()
@@ -729,19 +795,15 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.cancel()
             self.stop_button.setEnabled(False)
+            self.stop_action.setEnabled(False)
             self.statusBar().showMessage("正在安全停止…")
             self.append_log("已请求停止，将在当前安全边界结束。")
 
     def _update_settings(self) -> QSettings:
         return QSettings()
 
-    def _save_screencap_mode(self) -> None:
-        self._update_settings().setValue(
-            "run/screencap_mode", self.screencap_combo.currentData()
-        )
-
-    def _apply_screencap_mode(self, config: dict) -> None:
-        config["controller"]["screencap_mode"] = self.screencap_combo.currentData()
+    def _apply_mode_overrides(self, config: dict) -> None:
+        config["controller"].update(mode_controller_overrides(self.target_mode))
 
     def _auto_check_enabled(self) -> bool:
         return bool(
@@ -946,6 +1008,9 @@ class MainWindow(QMainWindow):
         self._thread = None
         self.run_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+        self.run_action.setEnabled(True)
+        self.stop_action.setEnabled(False)
+        self.run_settings_action.setEnabled(True)
 
     def append_log(self, message: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QPoint, QSettings
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -17,10 +17,12 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
+from window_auto.application.input_profiles import InputProfileName, RunMode
 from window_auto.gui.app import create_application
 from window_auto.gui.document import WorkflowDocument
 from window_auto.gui.main_window import MainWindow
 from window_auto.gui.property_editor import PropertyEditor
+from window_auto.gui.run_settings_dialog import RunSettingsDialog
 
 
 class GuiSmokeTests(unittest.TestCase):
@@ -91,8 +93,49 @@ class GuiSmokeTests(unittest.TestCase):
         window._update_mouse_position()
         self.assertRegex(
             window.mouse_position_label.text(),
-            r"鼠标 X: -?\d+  Y: -?\d+",
+            r"屏幕 X: -?\d+  Y: -?\d+",
         )
+        window.document.dirty = False
+        window.close()
+
+    def test_mouse_position_uses_window_coordinates_in_window_mode(self) -> None:
+        from window_auto.windowing.discovery import WindowInfo
+
+        window = MainWindow()
+        window.target_mode = RunMode.WINDOW
+        window.selected_window = WindowInfo(
+            hwnd=1,
+            title="记事本",
+            class_name="Notepad",
+            window_width=800,
+            window_height=600,
+            client_width=800,
+            client_height=600,
+            visible=True,
+            minimized=False,
+            client_x=100,
+            client_y=200,
+        )
+
+        with patch(
+            "window_auto.gui.main_window.live_client_origin",
+            return_value=(100, 200),
+        ), patch(
+            "window_auto.gui.main_window.QCursor.pos",
+            return_value=QPoint(350, 500),
+        ):
+            window._update_mouse_position()
+
+        self.assertEqual(window.mouse_position_label.text(), "窗口内 X: 250  Y: 300")
+
+        window.target_mode = RunMode.FULLSCREEN
+        with patch(
+            "window_auto.gui.main_window.QCursor.pos",
+            return_value=QPoint(350, 500),
+        ):
+            window._update_mouse_position()
+        self.assertEqual(window.mouse_position_label.text(), "屏幕 X: 350  Y: 500")
+
         window.document.dirty = False
         window.close()
 
@@ -123,7 +166,6 @@ class GuiSmokeTests(unittest.TestCase):
             document.save(path)
             window = MainWindow()
             window.selected_window = object()
-            window.target_label.setText("旧目标窗口")
 
             with patch(
                 "window_auto.gui.main_window.QFileDialog.getOpenFileName",
@@ -133,7 +175,7 @@ class GuiSmokeTests(unittest.TestCase):
 
             self.assertEqual(window.document.path, path.resolve())
             self.assertIsNone(window.selected_window)
-            self.assertEqual(window.target_label.text(), "未选择目标窗口")
+            self.assertIn("未选择窗口", window.target_summary_label.text())
             window.close()
 
     def test_template_step_has_retry_buttons_and_parameter_help(self) -> None:
@@ -513,7 +555,7 @@ class GuiSmokeTests(unittest.TestCase):
 
         self.assertGreater(calls_after_typing, calls_after_init)
         self.assertGreater(calls_after_toggle, calls_after_typing)
-    def test_screencap_mode_combo_defaults_and_persists(self) -> None:
+    def test_run_settings_persist_mode_and_profile(self) -> None:
         with TemporaryDirectory() as directory:
             settings_path = str(Path(directory) / "settings.ini")
 
@@ -525,38 +567,144 @@ class GuiSmokeTests(unittest.TestCase):
             ):
                 window = MainWindow()
 
-                values = [
-                    window.screencap_combo.itemData(index)
-                    for index in range(window.screencap_combo.count())
-                ]
-                self.assertEqual(values, ["background", "foreground"])
-                self.assertEqual(window.screencap_combo.currentData(), "background")
-
-                window.screencap_combo.setCurrentIndex(
-                    window.screencap_combo.findData("foreground")
-                )
+                self.assertEqual(window.target_mode, RunMode.WINDOW)
                 self.assertEqual(
-                    make_settings().value("run/screencap_mode"), "foreground"
+                    window.input_profile_name, InputProfileName.FOREGROUND_PRECISE
+                )
+
+                window.target_mode = RunMode.FULLSCREEN
+                window.input_profile_name = InputProfileName.FOREGROUND_COMPATIBLE
+                window._persist_run_settings()
+                self.assertEqual(make_settings().value("run/target_mode"), "fullscreen")
+                self.assertEqual(
+                    make_settings().value("run/input_profile"),
+                    "foreground-compatible",
                 )
 
                 rebuilt = MainWindow()
-                self.assertEqual(rebuilt.screencap_combo.currentData(), "foreground")
+                self.assertEqual(rebuilt.target_mode, RunMode.FULLSCREEN)
+                self.assertEqual(
+                    rebuilt.input_profile_name, InputProfileName.FOREGROUND_COMPATIBLE
+                )
 
                 rebuilt.document.dirty = False
                 rebuilt.close()
                 window.document.dirty = False
                 window.close()
 
-    def test_apply_screencap_mode_overrides_controller_config(self) -> None:
+    def test_apply_mode_overrides_controller_config(self) -> None:
         window = MainWindow()
-        config = {"controller": {"screencap_mode": "background"}}
 
-        window.screencap_combo.setCurrentIndex(
-            window.screencap_combo.findData("foreground")
+        window.target_mode = RunMode.FULLSCREEN
+        fullscreen_config = {"controller": {"screencap_mode": "background"}}
+        window._apply_mode_overrides(fullscreen_config)
+        self.assertEqual(
+            fullscreen_config["controller"]["screencap_mode"], "foreground"
         )
-        window._apply_screencap_mode(config)
+        self.assertEqual(fullscreen_config["controller"]["capture_scope"], "desktop")
+        self.assertEqual(
+            fullscreen_config["controller"]["foreground_screencap"],
+            ["DXGI_DesktopDup", "ScreenDC"],
+        )
 
-        self.assertEqual(config["controller"]["screencap_mode"], "foreground")
+        window.target_mode = RunMode.WINDOW
+        window_config = {"controller": {"screencap_mode": "foreground"}}
+        window._apply_mode_overrides(window_config)
+        self.assertEqual(window_config["controller"]["screencap_mode"], "background")
+        self.assertEqual(window_config["controller"]["capture_scope"], "window")
+
+        window.document.dirty = False
+        window.close()
+
+    def test_run_settings_dialog_filters_profiles_by_mode(self) -> None:
+        dialog = RunSettingsDialog(
+            RunMode.WINDOW, None, InputProfileName.FOREGROUND_PRECISE
+        )
+        self.assertTrue(dialog.select_window_button.isEnabled())
+        self.assertEqual(dialog.profile_combo.count(), 5)
+
+        dialog._mode_radios[RunMode.FULLSCREEN].click()
+        self.assertFalse(dialog.select_window_button.isEnabled())
+        self.assertEqual(
+            [
+                dialog.profile_combo.itemData(index)
+                for index in range(dialog.profile_combo.count())
+            ],
+            [InputProfileName.FOREGROUND_COMPATIBLE, InputProfileName.DRIVER_INTERCEPTION],
+        )
+        self.assertEqual(dialog.result_mode, RunMode.FULLSCREEN)
+        self.assertEqual(dialog.result_profile, InputProfileName.FOREGROUND_COMPATIBLE)
+        self.assertIn("整个屏幕", dialog.window_label.text())
+
+        dialog._mode_radios[RunMode.WINDOW].click()
+        self.assertTrue(dialog.select_window_button.isEnabled())
+        self.assertEqual(dialog.profile_combo.count(), 5)
+        dialog.reject()
+        dialog.close()
+
+    def test_window_mode_requires_window_but_fullscreen_does_not(self) -> None:
+        from window_auto.windowing.discovery import WindowInfo
+
+        window = MainWindow()
+        window.target_mode = RunMode.WINDOW
+        window.selected_window = None
+        with patch.object(QMessageBox, "information") as info:
+            window.run_workflow()
+        info.assert_called_once()
+
+        window.target_mode = RunMode.FULLSCREEN
+        fake_window = WindowInfo(
+            hwnd=1,
+            title="整个屏幕",
+            class_name="",
+            window_width=1920,
+            window_height=1080,
+            client_width=1920,
+            client_height=1080,
+            visible=True,
+            minimized=False,
+            client_x=0,
+            client_y=0,
+        )
+        window.document.dirty = True
+        with (
+            patch.object(QMessageBox, "information") as info,
+            patch(
+                "window_auto.gui.main_window.desktop_window_info",
+                return_value=fake_window,
+            ),
+            patch.object(MainWindow, "save_document", return_value=False),
+        ):
+            window.run_workflow()
+        info.assert_not_called()
+        window.document.dirty = False
+        window.close()
+
+    def test_target_summary_reflects_mode_and_window(self) -> None:
+        window = MainWindow()
+        self.assertIn("未选择窗口", window.target_summary_label.text())
+
+        window.target_mode = RunMode.FULLSCREEN
+        window._refresh_target_summary()
+        self.assertIn("整个屏幕", window.target_summary_label.text())
+
+        window.document.dirty = False
+        window.close()
+
+    def test_run_settings_action_is_reachable_from_the_menu_bar(self) -> None:
+        window = MainWindow()
+
+        menu_titles = [action.text() for action in window.menuBar().actions()]
+        self.assertIn("运行(&R)", menu_titles)
+        menu_actions = [
+            action
+            for menu in window.menuBar().actions()
+            for action in menu.menu().actions()
+        ]
+        self.assertIn(window.run_settings_action, menu_actions)
+        self.assertIn(window.run_action, menu_actions)
+        self.assertIn(window.stop_action, menu_actions)
+
         window.document.dirty = False
         window.close()
 

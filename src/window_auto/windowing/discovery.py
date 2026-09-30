@@ -58,6 +58,53 @@ def _client_origin(user32: Any, hwnd: int) -> tuple[int | None, int | None]:
     return int(point.x), int(point.y)
 
 
+def live_client_origin(hwnd: int) -> tuple[int, int] | None:
+    """Return the current screen position of a window's client-area origin."""
+    if sys.platform != "win32":
+        return None
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+    user32.ClientToScreen.restype = wintypes.BOOL
+    return _client_origin(user32, hwnd)
+
+
+def desktop_window_info() -> WindowInfo:
+    """Return a synthetic ``WindowInfo`` representing the whole primary desktop.
+
+    The desktop window handle lets the Maa Win32 controller use screen-level
+    screencap methods (DXGI_DesktopDup / ScreenDC) without touching any
+    application window, which is the fullscreen game mode target.
+    """
+    if sys.platform != "win32":
+        raise RuntimeError("Desktop window discovery is only supported on Windows.")
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetDesktopWindow.restype = wintypes.HWND
+    user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(_Rect)]
+    user32.GetClientRect.restype = wintypes.BOOL
+    user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+    user32.ClientToScreen.restype = wintypes.BOOL
+
+    hwnd = _handle_value(user32.GetDesktopWindow())
+    if hwnd == 0:
+        raise RuntimeError("无法获取桌面窗口句柄，全屏模式不可用。")
+    client_width, client_height = _rect_size(user32, "GetClientRect", hwnd)
+    client_x, client_y = _client_origin(user32, hwnd)
+    return WindowInfo(
+        hwnd=hwnd,
+        title="整个屏幕",
+        class_name="",
+        window_width=client_width,
+        window_height=client_height,
+        client_width=client_width,
+        client_height=client_height,
+        visible=True,
+        minimized=False,
+        client_x=client_x,
+        client_y=client_y,
+    )
+
+
 def matches_filters(
     window: WindowInfo,
     title_filter: str | None = None,

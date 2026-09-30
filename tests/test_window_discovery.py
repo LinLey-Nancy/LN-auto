@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from window_auto.windowing.discovery import WindowInfo, find_windows, matches_filters
+from window_auto.windowing.discovery import (
+    WindowInfo,
+    desktop_window_info,
+    find_windows,
+    matches_filters,
+)
 from window_auto.windowing.selector import (
     AmbiguousWindowError,
     WindowNotFoundError,
@@ -76,6 +81,19 @@ class WindowFilterTests(unittest.TestCase):
 
         self.assertEqual([window.title for window in windows], ["real"])
         self.assertEqual(windows[0].hwnd, 0x10)
+
+    def test_desktop_window_info_covers_the_primary_screen(self) -> None:
+        desktop = desktop_window_info()
+
+        self.assertNotEqual(desktop.hwnd, 0)
+        self.assertEqual(desktop.title, "整个屏幕")
+        self.assertTrue(desktop.visible)
+        self.assertFalse(desktop.minimized)
+        self.assertIsNotNone(desktop.client_width)
+        self.assertIsNotNone(desktop.client_height)
+        self.assertGreater(desktop.client_width, 0)
+        self.assertGreater(desktop.client_height, 0)
+        self.assertEqual((desktop.client_x, desktop.client_y), (0, 0))
 
 
 if __name__ == "__main__":
