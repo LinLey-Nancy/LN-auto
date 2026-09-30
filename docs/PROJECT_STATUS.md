@@ -16,11 +16,14 @@ LN-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终�
 
 ## 2026-09-30 更新内容
 
+**已发布 v0.3.2**：提交 `34cd8be`（feat: 运行模式）、`1e6141c`（chore: 发布 v0.3.2）与 tag `v0.3.2` 已推送 GitHub；`dist/LN-auto-v0.3.2-Setup.exe`（75.1MB）构建成功，冻结版 offscreen smoke 通过；GitHub Release 已创建（非草稿），资产 78,739,687 字节与本地一致。
+
 - 引入「运行模式」策略（菜单「运行 → 运行设置…」），替代原先工具栏上独立的「截图方式」下拉：
   - **窗口模式（办公自动化）**：必须选择目标窗口；窗口级截图（FramePool+PrintWindow，可被遮挡/后台），`screencap_mode=background` + `capture_scope=window`；五种输入策略全部可选，默认前台精确点击。
   - **全屏模式（游戏防检测）**：无需选择窗口，目标为「整个屏幕」——新增 `windowing/discovery.desktop_window_info()` 返回桌面伪窗口（`GetDesktopWindow` 句柄，客户区原点 (0,0)、尺寸即屏幕尺寸），使既有 desktop scope 坐标映射退化为纯缩放，`workflow/actions.py` 与 `runtime/win32_controller.py` 零改动复用；截图强制屏幕级（`screencap_mode=foreground` + `capture_scope=desktop`，截图方法覆盖为 DXGI_DesktopDup/ScreenDC，不触碰游戏窗口）；输入策略仅保留前台兼容（Seize，默认）与驱动级——后台消息与前台精确点击依赖窗口句柄/客户区，全屏模式下不提供。
   - 模式与输入策略经 QSettings（`run/target_mode`、`run/input_profile`）持久化；运行确认对话框显示模式、目标、输入策略与派生截图方式；CLI 行为不变（仍读 `config/default.json`）。
 - 主工具栏精简：目标窗口标签、选择窗口按钮、输入策略下拉、截图方式下拉全部收进「运行设置」弹窗；工具栏只保留新建/打开/保存、只读目标摘要和停止/运行。菜单栏新增「运行」菜单（运行设置…、运行工作流 F5、停止），运行期间运行设置入口禁用。
+- 状态栏鼠标坐标按模式区分：窗口模式且已选窗口时显示「窗口内 X/Y」（屏幕坐标减去 `live_client_origin()` 实时客户区原点，可直接填入步骤），全屏模式或未选窗口时显示「屏幕 X/Y」。注意两种模式坐标系不同，跨模式复用工作流/模板需重新取点。
 
 ## 2026-09-28 更新内容
 
