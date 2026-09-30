@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QSize, QStandardPaths, Qt, QThread, QTimer, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QCursor, QDesktopServices, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -61,6 +61,7 @@ from window_auto.windowing.discovery import (
     WindowInfo,
     desktop_window_info,
     live_client_origin,
+    physical_cursor_pos,
 )
 from window_auto.workflow.events import WorkflowEvent, WorkflowEventType
 from window_auto.workflow.loader import WorkflowV2ConfigError, load_workflow_v2
@@ -167,16 +168,18 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(5000, self, self._auto_check_updates)
 
     def _update_mouse_position(self) -> None:
-        position = QCursor.pos()
+        position = physical_cursor_pos()
+        if position is None:
+            return
+        x, y = position
         if self.target_mode is RunMode.WINDOW and self.selected_window is not None:
             origin = live_client_origin(self.selected_window.hwnd)
             if origin is not None:
                 self.mouse_position_label.setText(
-                    f"窗口内 X: {position.x() - origin[0]}"
-                    f"  Y: {position.y() - origin[1]}"
+                    f"窗口内 X: {x - origin[0]}  Y: {y - origin[1]}"
                 )
                 return
-        self.mouse_position_label.setText(f"屏幕 X: {position.x()}  Y: {position.y()}")
+        self.mouse_position_label.setText(f"屏幕 X: {x}  Y: {y}")
 
     def _build_actions(self) -> None:
         self.new_action = QAction("新建", self)
@@ -736,7 +739,7 @@ class MainWindow(QMainWindow):
         try:
             definition = load_workflow_v2(self.document.path, PROJECT_ROOT)
             config = load_config(DEFAULT_CONFIG_PATH)
-            self._apply_mode_overrides(config)
+            self._apply_mode_overrides(config, window)
         except (WorkflowV2ConfigError, OSError, ValueError) as error:
             QMessageBox.critical(self, "工作流无法运行", str(error))
             return
@@ -830,8 +833,24 @@ class MainWindow(QMainWindow):
         self.append_log(f"已置顶聚焦窗口：{self.selected_window.title}")
         return True
 
-    def _apply_mode_overrides(self, config: dict) -> None:
+    def _apply_mode_overrides(
+        self,
+        config: dict,
+        window: WindowInfo | None = None,
+    ) -> None:
         config["controller"].update(mode_controller_overrides(self.target_mode))
+        if (
+            self.target_mode is RunMode.FULLSCREEN
+            and window is not None
+            and window.client_width
+            and window.client_height
+        ):
+            # Seize 输入以 Maa 缩放后的截图空间解释坐标；把控制器截图长边钉到
+            # 桌面原始尺寸，使该空间与物理屏幕像素一致，避免点击错位。
+            config["controller"]["controller_target_long_side"] = max(
+                window.client_width,
+                window.client_height,
+            )
 
     def _auto_check_enabled(self) -> bool:
         return bool(

@@ -68,6 +68,23 @@ def live_client_origin(hwnd: int) -> tuple[int, int] | None:
     return _client_origin(user32, hwnd)
 
 
+def physical_cursor_pos() -> tuple[int, int] | None:
+    """Return the cursor position in physical screen pixels (DPI-unscaled).
+
+    ``QCursor.pos()`` reports Qt logical coordinates, which shrink under
+    display scaling; the capture and input chain uses physical pixels.
+    """
+    if sys.platform != "win32":
+        return None
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+    user32.GetCursorPos.restype = wintypes.BOOL
+    point = wintypes.POINT()
+    if not user32.GetCursorPos(ctypes.byref(point)):
+        return None
+    return int(point.x), int(point.y)
+
+
 def desktop_window_info() -> WindowInfo:
     """Return a synthetic ``WindowInfo`` representing the whole primary desktop.
 

@@ -6,6 +6,7 @@ from window_auto.windowing.discovery import (
     desktop_window_info,
     find_windows,
     matches_filters,
+    physical_cursor_pos,
 )
 from window_auto.windowing.selector import (
     AmbiguousWindowError,
@@ -94,6 +95,14 @@ class WindowFilterTests(unittest.TestCase):
         self.assertGreater(desktop.client_width, 0)
         self.assertGreater(desktop.client_height, 0)
         self.assertEqual((desktop.client_x, desktop.client_y), (0, 0))
+
+    def test_physical_cursor_pos_returns_screen_coordinates(self) -> None:
+        position = physical_cursor_pos()
+
+        self.assertIsNotNone(position)
+        x, y = position
+        self.assertGreaterEqual(x, 0)
+        self.assertGreaterEqual(y, 0)
 
 
 if __name__ == "__main__":

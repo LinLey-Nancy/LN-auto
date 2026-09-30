@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QSettings
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -122,8 +122,8 @@ class GuiSmokeTests(unittest.TestCase):
             "window_auto.gui.main_window.live_client_origin",
             return_value=(100, 200),
         ), patch(
-            "window_auto.gui.main_window.QCursor.pos",
-            return_value=QPoint(350, 500),
+            "window_auto.gui.main_window.physical_cursor_pos",
+            return_value=(350, 500),
         ):
             window._update_mouse_position()
 
@@ -131,8 +131,8 @@ class GuiSmokeTests(unittest.TestCase):
 
         window.target_mode = RunMode.FULLSCREEN
         with patch(
-            "window_auto.gui.main_window.QCursor.pos",
-            return_value=QPoint(350, 500),
+            "window_auto.gui.main_window.physical_cursor_pos",
+            return_value=(350, 500),
         ):
             window._update_mouse_position()
         self.assertEqual(window.mouse_position_label.text(), "屏幕 X: 350  Y: 500")
@@ -595,11 +595,26 @@ class GuiSmokeTests(unittest.TestCase):
                 window.close()
 
     def test_apply_mode_overrides_controller_config(self) -> None:
+        from window_auto.windowing.discovery import WindowInfo
+
         window = MainWindow()
 
         window.target_mode = RunMode.FULLSCREEN
         fullscreen_config = {"controller": {"screencap_mode": "background"}}
-        window._apply_mode_overrides(fullscreen_config)
+        desktop = WindowInfo(
+            hwnd=1,
+            title="整个屏幕",
+            class_name="",
+            window_width=1920,
+            window_height=1080,
+            client_width=1920,
+            client_height=1080,
+            visible=True,
+            minimized=False,
+            client_x=0,
+            client_y=0,
+        )
+        window._apply_mode_overrides(fullscreen_config, desktop)
         self.assertEqual(
             fullscreen_config["controller"]["screencap_mode"], "foreground"
         )
@@ -608,12 +623,16 @@ class GuiSmokeTests(unittest.TestCase):
             fullscreen_config["controller"]["foreground_screencap"],
             ["DXGI_DesktopDup", "ScreenDC"],
         )
+        self.assertEqual(
+            fullscreen_config["controller"]["controller_target_long_side"], 1920
+        )
 
         window.target_mode = RunMode.WINDOW
         window_config = {"controller": {"screencap_mode": "foreground"}}
         window._apply_mode_overrides(window_config)
         self.assertEqual(window_config["controller"]["screencap_mode"], "background")
         self.assertEqual(window_config["controller"]["capture_scope"], "window")
+        self.assertNotIn("controller_target_long_side", window_config["controller"])
 
         window.document.dirty = False
         window.close()

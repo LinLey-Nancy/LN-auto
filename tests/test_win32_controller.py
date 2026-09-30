@@ -110,6 +110,18 @@ class Win32ControllerConfigTests(unittest.TestCase):
 
         self.assertEqual(raw, (1366, 768))
 
+    def test_controller_target_long_side_overrides_screenshot_target(self) -> None:
+        config = {
+            "screenshot_target_long_side": 1280,
+            "controller_target_long_side": 1920,
+            "capture_scope": "desktop",
+        }
+        controller = _FakeController(screenshot_resolution=(1920, 1080))
+
+        _, screenshot = connect_controller(controller, config)
+
+        self.assertEqual(screenshot, (1920, 1080))
+
     def test_mouse_lock_follow_is_enabled_after_connection(self) -> None:
         config = {
             **CONTROLLER_CONFIG,

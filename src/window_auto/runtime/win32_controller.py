@@ -49,7 +49,10 @@ def create_controller(window: WindowInfo, controller_config: dict[str, Any]) -> 
         )
         mouse_input = controller_config["mouse_input"]
         keyboard_input = controller_config["keyboard_input"]
-        target_long_side = controller_config["screenshot_target_long_side"]
+        target_long_side = controller_config.get(
+            "controller_target_long_side",
+            controller_config["screenshot_target_long_side"],
+        )
     except KeyError as error:
         raise ControllerConnectionError(
             f"Controller configuration is missing the key: {error}"
@@ -129,7 +132,10 @@ def connect_controller(
                 f"required {expected_screenshot[0]}x{expected_screenshot[1]}; no input was sent."
             )
 
-    target_long_side = controller_config["screenshot_target_long_side"]
+    target_long_side = controller_config.get(
+        "controller_target_long_side",
+        controller_config["screenshot_target_long_side"],
+    )
     if abs(max(screenshot_resolution) - target_long_side) > 1:
         raise ControllerConnectionError(
             f"Screenshot resolution {screenshot_width}x{screenshot_height} does not match "
