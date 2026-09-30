@@ -72,10 +72,15 @@ class RunSettingsDialog(QDialog):
             self._mode_radios[value] = radio
 
         window_row = QHBoxLayout()
-        window_row.addWidget(QLabel("目标窗口："))
+        self.window_row_label = QLabel("目标窗口：")
+        window_row.addWidget(self.window_row_label)
         self.window_label = QLabel()
         self.window_label.setObjectName("mutedLabel")
         window_row.addWidget(self.window_label, 1)
+        self.clear_window_button = QPushButton("清除")
+        self.clear_window_button.setObjectName("clearRunWindowButton")
+        self.clear_window_button.setToolTip("取消绑定聚焦窗口（仅全屏模式可用）")
+        window_row.addWidget(self.clear_window_button)
         self.select_window_button = QPushButton("选择窗口…")
         self.select_window_button.setObjectName("selectRunWindowButton")
         window_row.addWidget(self.select_window_button)
@@ -113,6 +118,7 @@ class RunSettingsDialog(QDialog):
                 lambda checked, changed=value: checked and self._apply_mode(changed)
             )
         self.select_window_button.clicked.connect(self._choose_window)
+        self.clear_window_button.clicked.connect(self._clear_window)
         self.profile_combo.currentIndexChanged.connect(self._on_profile_changed)
 
         self._apply_mode(mode, preferred_profile=profile_name)
@@ -124,7 +130,7 @@ class RunSettingsDialog(QDialog):
     ) -> None:
         self.result_mode = mode
         fullscreen = mode is RunMode.FULLSCREEN
-        self.select_window_button.setEnabled(not fullscreen)
+        self.window_row_label.setText("聚焦窗口：" if fullscreen else "目标窗口：")
         self._refresh_window_label()
         self.screencap_label.setText(MODE_SCREENCAP_LABELS[mode])
 
@@ -141,16 +147,24 @@ class RunSettingsDialog(QDialog):
         self._refresh_warning()
 
     def _refresh_window_label(self) -> None:
-        if self.result_mode is RunMode.FULLSCREEN:
-            self.window_label.setText("整个屏幕（无需选择窗口）")
-        elif self.selected_window is None:
-            self.window_label.setText("未选择（运行前必须选择）")
-        else:
-            window = self.selected_window
-            self.window_label.setText(f"{window.title} · {window.class_name}")
-            self.window_label.setToolTip(
-                f"HWND 0x{window.hwnd:X} · 客户区 {window.client_width}×{window.client_height}"
-            )
+        fullscreen = self.result_mode is RunMode.FULLSCREEN
+        self.clear_window_button.setVisible(fullscreen and self.selected_window is not None)
+        if self.selected_window is None:
+            if fullscreen:
+                self.window_label.setText("未绑定（可选，仅用于运行前置顶）")
+            else:
+                self.window_label.setText("未选择（运行前必须选择）")
+            self.window_label.setToolTip("")
+            return
+        window = self.selected_window
+        self.window_label.setText(f"{window.title} · {window.class_name}")
+        self.window_label.setToolTip(
+            f"HWND 0x{window.hwnd:X} · 客户区 {window.client_width}×{window.client_height}"
+        )
+
+    def _clear_window(self) -> None:
+        self.selected_window = None
+        self._refresh_window_label()
 
     def _on_profile_changed(self) -> None:
         profile = self.profile_combo.currentData()

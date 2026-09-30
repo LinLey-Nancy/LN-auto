@@ -23,6 +23,7 @@ from window_auto.gui.document import WorkflowDocument
 from window_auto.gui.main_window import MainWindow
 from window_auto.gui.property_editor import PropertyEditor
 from window_auto.gui.run_settings_dialog import RunSettingsDialog
+from window_auto.runtime.win32_input import DirectInputError
 
 
 class GuiSmokeTests(unittest.TestCase):
@@ -165,6 +166,7 @@ class GuiSmokeTests(unittest.TestCase):
             document.add_step("wait")
             document.save(path)
             window = MainWindow()
+            window.target_mode = RunMode.WINDOW
             window.selected_window = object()
 
             with patch(
@@ -621,10 +623,11 @@ class GuiSmokeTests(unittest.TestCase):
             RunMode.WINDOW, None, InputProfileName.FOREGROUND_PRECISE
         )
         self.assertTrue(dialog.select_window_button.isEnabled())
+        self.assertTrue(dialog.clear_window_button.isHidden())
         self.assertEqual(dialog.profile_combo.count(), 5)
 
         dialog._mode_radios[RunMode.FULLSCREEN].click()
-        self.assertFalse(dialog.select_window_button.isEnabled())
+        self.assertTrue(dialog.select_window_button.isEnabled())
         self.assertEqual(
             [
                 dialog.profile_combo.itemData(index)
@@ -634,11 +637,42 @@ class GuiSmokeTests(unittest.TestCase):
         )
         self.assertEqual(dialog.result_mode, RunMode.FULLSCREEN)
         self.assertEqual(dialog.result_profile, InputProfileName.FOREGROUND_COMPATIBLE)
-        self.assertIn("整个屏幕", dialog.window_label.text())
+        self.assertIn("未绑定", dialog.window_label.text())
 
         dialog._mode_radios[RunMode.WINDOW].click()
-        self.assertTrue(dialog.select_window_button.isEnabled())
         self.assertEqual(dialog.profile_combo.count(), 5)
+        dialog.reject()
+        dialog.close()
+
+    def test_run_settings_dialog_fullscreen_window_binding_is_optional(self) -> None:
+        from window_auto.windowing.discovery import WindowInfo
+
+        bound = WindowInfo(
+            hwnd=0x1234,
+            title="游戏大厅",
+            class_name="GameWindow",
+            window_width=1920,
+            window_height=1080,
+            client_width=1920,
+            client_height=1080,
+            visible=True,
+            minimized=False,
+        )
+        dialog = RunSettingsDialog(
+            RunMode.FULLSCREEN, bound, InputProfileName.FOREGROUND_COMPATIBLE
+        )
+        self.assertIn("游戏大厅", dialog.window_label.text())
+        self.assertFalse(dialog.clear_window_button.isHidden())
+
+        dialog.clear_window_button.click()
+        self.assertIsNone(dialog.selected_window)
+        self.assertIn("未绑定", dialog.window_label.text())
+        self.assertTrue(dialog.clear_window_button.isHidden())
+
+        dialog._mode_radios[RunMode.WINDOW].click()
+        self.assertIn("未选择", dialog.window_label.text())
+        self.assertTrue(dialog.clear_window_button.isHidden())
+
         dialog.reject()
         dialog.close()
 
@@ -682,11 +716,56 @@ class GuiSmokeTests(unittest.TestCase):
 
     def test_target_summary_reflects_mode_and_window(self) -> None:
         window = MainWindow()
+        window.target_mode = RunMode.WINDOW
+        window._refresh_target_summary()
         self.assertIn("未选择窗口", window.target_summary_label.text())
 
         window.target_mode = RunMode.FULLSCREEN
         window._refresh_target_summary()
         self.assertIn("整个屏幕", window.target_summary_label.text())
+
+        window.document.dirty = False
+        window.close()
+
+    def test_foreground_bound_window_only_runs_in_fullscreen_with_binding(self) -> None:
+        from window_auto.windowing.discovery import WindowInfo
+
+        bound = WindowInfo(
+            hwnd=0x1234,
+            title="游戏大厅",
+            class_name="GameWindow",
+            window_width=1920,
+            window_height=1080,
+            client_width=1920,
+            client_height=1080,
+            visible=True,
+            minimized=False,
+        )
+        window = MainWindow()
+
+        window.target_mode = RunMode.WINDOW
+        window.selected_window = bound
+        with patch("window_auto.gui.main_window.foreground_window") as foreground:
+            self.assertTrue(window._foreground_bound_window())
+        foreground.assert_not_called()
+
+        window.target_mode = RunMode.FULLSCREEN
+        window.selected_window = None
+        with patch("window_auto.gui.main_window.foreground_window") as foreground:
+            self.assertTrue(window._foreground_bound_window())
+        foreground.assert_not_called()
+
+        window.selected_window = bound
+        with patch("window_auto.gui.main_window.foreground_window") as foreground:
+            self.assertTrue(window._foreground_bound_window())
+        foreground.assert_called_once_with(bound)
+
+        with patch(
+            "window_auto.gui.main_window.foreground_window",
+            side_effect=DirectInputError("置顶窗口已关闭或不存在，请在运行设置中重新绑定。"),
+        ), patch.object(QMessageBox, "warning") as warning:
+            self.assertFalse(window._foreground_bound_window())
+        warning.assert_called_once()
 
         window.document.dirty = False
         window.close()

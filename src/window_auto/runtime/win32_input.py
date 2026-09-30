@@ -31,6 +31,51 @@ _BUTTON_FLAGS = {
 }
 
 
+def foreground_window(window: WindowInfo) -> None:
+    """Restore ``window`` and bring it to the foreground, like an Alt+Tab.
+
+    Only used to give the target focus before a fullscreen run; it performs
+    no window-level capture and sends no messages to the target process.
+    """
+    if sys.platform != "win32":
+        raise DirectInputError("窗口置顶仅支持 Windows 系统。")
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    hwnd = wintypes.HWND(window.hwnd)
+    user32.IsWindow.argtypes = [wintypes.HWND]
+    user32.IsWindow.restype = wintypes.BOOL
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.IsIconic.restype = wintypes.BOOL
+    user32.ShowWindowAsync.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindowAsync.restype = wintypes.BOOL
+    user32.BringWindowToTop.argtypes = [wintypes.HWND]
+    user32.BringWindowToTop.restype = wintypes.BOOL
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    user32.GetForegroundWindow.restype = wintypes.HWND
+
+    if not user32.IsWindow(hwnd):
+        raise DirectInputError("置顶窗口已关闭或不存在，请在运行设置中重新绑定。")
+    if user32.IsIconic(hwnd):
+        user32.ShowWindowAsync(hwnd, 9)  # SW_RESTORE
+        time.sleep(0.25)
+    else:
+        user32.ShowWindowAsync(hwnd, 5)  # SW_SHOW
+
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    for _ in range(10):
+        if int(user32.GetForegroundWindow() or 0) == window.hwnd:
+            return
+        time.sleep(0.05)
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+    raise DirectInputError(
+        "Windows 不允许置顶窗口切换到前台。"
+        "请确认目标未被全屏独占程序或远程桌面遮挡，然后重试。"
+    )
+
+
 def click_client_point(
     window: WindowInfo,
     point: tuple[int, int],

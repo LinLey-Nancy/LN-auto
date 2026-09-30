@@ -1,7 +1,11 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from window_auto.runtime.win32_input import DirectInputError, click_client_point
+from window_auto.runtime.win32_input import (
+    DirectInputError,
+    click_client_point,
+    foreground_window,
+)
 
 
 class _Window:
@@ -113,6 +117,46 @@ class ClickClientPointHumanizeTests(unittest.TestCase):
         self.assertEqual(result, (80, 80))
         self.assertGreater(len(positions), 2)
         self.assertEqual(positions[-1], (80, 80))
+
+
+class ForegroundWindowTests(unittest.TestCase):
+    def test_invalid_window_is_rejected_before_any_input(self) -> None:
+        user32 = _fake_user32(_Window.hwnd)
+        user32.IsWindow.return_value = False
+
+        with patch(
+            "window_auto.runtime.win32_input.ctypes.WinDLL", return_value=user32
+        ):
+            with self.assertRaises(DirectInputError) as raised:
+                foreground_window(_Window())
+
+        message = str(raised.exception)
+        self.assertIn("重新绑定", message)
+        user32.SetForegroundWindow.assert_not_called()
+
+    def test_foreground_success_returns_without_error(self) -> None:
+        user32 = _fake_user32(_Window.hwnd)
+
+        with patch(
+            "window_auto.runtime.win32_input.ctypes.WinDLL", return_value=user32
+        ):
+            foreground_window(_Window())
+
+        user32.SetForegroundWindow.assert_called()
+
+    def test_foreground_refusal_is_chinese_and_actionable(self) -> None:
+        user32 = _fake_user32(_Window.hwnd)
+        user32.GetForegroundWindow.return_value = 0
+
+        with patch(
+            "window_auto.runtime.win32_input.ctypes.WinDLL", return_value=user32
+        ):
+            with self.assertRaises(DirectInputError) as raised:
+                foreground_window(_Window())
+
+        message = str(raised.exception)
+        self.assertIn("前台", message)
+        self.assertNotIn("Windows did not allow", message)
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ from window_auto.gui.template_creator import TemplateCreationDialog
 from window_auto.gui.update_checker import UpdateChecker, UpdateDownloader
 from window_auto.gui.worker import WorkflowWorker
 from window_auto.paths import project_root, workflow_dir
+from window_auto.runtime.win32_input import DirectInputError, foreground_window
 from window_auto.update import RELEASES_PAGE_URL, ReleaseInfo
 from window_auto.version import current_version
 from window_auto.windowing.discovery import (
@@ -272,6 +273,8 @@ class MainWindow(QMainWindow):
     def _refresh_target_summary(self) -> None:
         if self.target_mode is RunMode.FULLSCREEN:
             text = "目标：全屏模式 · 整个屏幕"
+            if self.selected_window is not None:
+                text += f"（置顶：{self.selected_window.title}）"
         elif self.selected_window is None:
             text = "目标：窗口模式 · 未选择窗口"
         else:
@@ -297,16 +300,14 @@ class MainWindow(QMainWindow):
             return
         self.target_mode = dialog.result_mode
         self.input_profile_name = dialog.result_profile
-        if (
-            dialog.selected_window is not None
-            and dialog.selected_window is not self.selected_window
-        ):
+        if dialog.selected_window is not self.selected_window:
             self.selected_window = dialog.selected_window
-            self.document.set_target(
-                self.selected_window.title,
-                self.selected_window.class_name,
-            )
-            self._update_title()
+            if self.selected_window is not None:
+                self.document.set_target(
+                    self.selected_window.title,
+                    self.selected_window.class_name,
+                )
+                self._update_title()
         self._persist_run_settings()
         self._refresh_target_summary()
 
@@ -741,9 +742,22 @@ class MainWindow(QMainWindow):
             return
 
         profile = get_input_profile(self.input_profile_name)
+        focus_line = ""
+        if self.target_mode is RunMode.FULLSCREEN:
+            if self.selected_window is not None:
+                focus_line = (
+                    f"置顶窗口：{self.selected_window.title}"
+                    "（仅运行前拉回前台，不做窗口级交互）\n"
+                )
+            else:
+                focus_line = (
+                    "未绑定置顶窗口：请保持游戏位于前台；"
+                    "独占全屏游戏失焦后会被系统最小化。\n"
+                )
         warning = (
             f"模式：{MODE_LABELS[self.target_mode]}\n"
             f"目标：{window.title}\n"
+            f"{focus_line}"
             f"输入策略：{PROFILE_LABELS[self.input_profile_name]}\n"
             f"截图方式：{MODE_SCREENCAP_LABELS[self.target_mode]}\n\n"
             f"{profile.warning}\n\n"
@@ -759,6 +773,8 @@ class MainWindow(QMainWindow):
             )
             != QMessageBox.StandardButton.Yes
         ):
+            return
+        if not self._foreground_bound_window():
             return
 
         workspace = create_debug_workspace(
@@ -801,6 +817,18 @@ class MainWindow(QMainWindow):
 
     def _update_settings(self) -> QSettings:
         return QSettings()
+
+    def _foreground_bound_window(self) -> bool:
+        """In fullscreen mode, bring the optional bound window to the front."""
+        if self.target_mode is not RunMode.FULLSCREEN or self.selected_window is None:
+            return True
+        try:
+            foreground_window(self.selected_window)
+        except DirectInputError as error:
+            QMessageBox.warning(self, "无法置顶聚焦窗口", str(error))
+            return False
+        self.append_log(f"已置顶聚焦窗口：{self.selected_window.title}")
+        return True
 
     def _apply_mode_overrides(self, config: dict) -> None:
         config["controller"].update(mode_controller_overrides(self.target_mode))
