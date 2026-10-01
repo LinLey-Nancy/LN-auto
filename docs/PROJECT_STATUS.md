@@ -16,6 +16,8 @@ LN-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终�
 
 ## 2026-10-01 更新内容
 
+**已发布 v0.3.5**：提交 `fbff661`（feat: 鼠标操作）、`9a568c3`（chore: 发布 v0.3.5）与 tag `v0.3.5` 已推送；`dist/LN-auto-v0.3.5-Setup.exe`（75.1MB）构建成功，冻结版 offscreen smoke 通过；GitHub Release 已创建（非草稿），资产 78,736,888 字节与本地一致（脚本 `debug/create_release_v035.py`）。本版本同时包含前一工作日未发布的全屏点击错位修复（`630b6d0`）。
+
 - 「鼠标点击」步骤升级为「鼠标操作」：`mouse_click` 步骤新增 `action` 字段（`click` 默认 / `scroll`），滚动支持 `scroll_direction`（up/down）与 `scroll_amount`（1–100 格），位置同样支持固定坐标或识别结果变量。执行层：Maa 通道先 `post_touch_move` 定位再 `post_scroll(0, ±120×格数)`（修复了拟人曲线开启但指针位置未知时滚动前不移动的问题）；前台精确直连通道新增 `win32_input.scroll_client_point`（ClientToScreen + SetCursorPos + `mouse_event` 滚轮）。GUI：属性面板按操作方式动态显隐「鼠标按键/点击次数/间隔」与「滚动方向/滚动格数」，步骤摘要显示「滚轮向下滚动 3 格 (640, 400)」。loader 严格校验新字段；`config/workflow.v2.example.json` 追加滚动示例。269 项 pytest 通过。
 
 ## 2026-09-30 更新内容
