@@ -39,11 +39,14 @@ STEP_DEFAULTS: dict[str, dict[str, Any]] = {
         "delta_y": 0,
     },
     "mouse_click": {
+        "action": "click",
         "x": 0,
         "y": 0,
         "button": "left",
         "count": 1,
         "interval_ms": 100,
+        "scroll_direction": "up",
+        "scroll_amount": 3,
     },
     "key_press": {
         "key": "ENTER",
@@ -83,7 +86,7 @@ STEP_DEFAULTS: dict[str, dict[str, Any]] = {
 STEP_LABELS = {
     "template_match": "模板识别",
     "mouse_move": "鼠标移动",
-    "mouse_click": "鼠标点击",
+    "mouse_click": "鼠标操作",
     "key_press": "键盘按键",
     "text_input": "文本输入",
     "wait": "延迟",

@@ -47,8 +47,11 @@ FIELD_LABELS = {
     "delta_x": "X 移动距离",
     "delta_y": "Y 移动距离",
     "match_variable": "匹配变量",
+    "action": "操作方式",
     "button": "鼠标按键",
     "count": "点击次数",
+    "scroll_direction": "滚动方向",
+    "scroll_amount": "滚动格数",
     "key": "按键",
     "modifiers": "组合键",
     "hold_ms": "按下持续（毫秒）",
@@ -93,7 +96,7 @@ FIELD_HELP = {
         "若失败策略为“再次运行”，次数用完后会开启下一轮。"
     ),
     "result_variable": (
-        "保存识别结果的位置名称。后续鼠标点击步骤可以通过“匹配变量”"
+        "保存识别结果的位置名称。后续鼠标操作步骤可以通过“匹配变量”"
         "读取该结果并点击识别区域中心。"
     ),
     "post_action": (
@@ -117,8 +120,11 @@ FIELD_HELP = {
     "delta_x": "相对移动的水平距离。正数向右，负数向左。",
     "delta_y": "相对移动的垂直距离。正数向下，负数向上。",
     "match_variable": "读取模板识别步骤保存的结果变量，并使用匹配区域中心作为位置。",
+    "action": "“点击”在目标位置发送鼠标按键；“滚轮滚动”在目标位置滚动鼠标滚轮。",
     "button": "要发送的鼠标按键。",
     "count": "点击次数；1 为单击，2 为双击。",
+    "scroll_direction": "滚轮滚动的方向：向上或向下。",
+    "scroll_amount": "滚轮滚动的格数；1 格约为常见鼠标的一次刻度。",
     "key": (
         "要发送的按键。点击右侧“选择按键”按钮，"
         "在弹出的键盘布局窗口中点选，避免输错键名。"
@@ -142,6 +148,8 @@ FIELD_HELP = {
 
 CHOICES = {
     "on_failure": (("停止工作流", "stop"), ("继续下一步", "continue")),
+    "action": (("点击", "click"), ("滚轮滚动", "scroll")),
+    "scroll_direction": (("向上", "up"), ("向下", "down")),
     "button": (("左键", "left"), ("右键", "right"), ("中键", "middle")),
     "post_button": (("左键", "left"), ("右键", "right"), ("中键", "middle")),
     "post_action": (
@@ -227,6 +235,12 @@ class PropertyEditor(QWidget):
                 return move_mode == "absolute"
             if key in {"delta_x", "delta_y"}:
                 return move_mode == "relative"
+        if step_type == "mouse_click":
+            action = step.get("action", "click")
+            if key in {"button", "count", "interval_ms"}:
+                return action == "click"
+            if key in {"scroll_direction", "scroll_amount"}:
+                return action == "scroll"
         if step_type in {"template_match", "ocr_match"}:
             post_action = step.get("post_action", "none")
             if key == "post_button":
@@ -277,6 +291,8 @@ class PropertyEditor(QWidget):
                 widget.setRange(-1_000_000, 1_000_000)
             elif key == "count":
                 widget.setRange(1, 2)
+            elif key == "scroll_amount":
+                widget.setRange(1, 100)
             elif key == "attempts":
                 widget.setRange(1, 100)
             else:

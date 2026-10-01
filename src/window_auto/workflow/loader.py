@@ -39,7 +39,17 @@ _TYPE_FIELDS = {
         "max_duration_ms",
     },
     "mouse_move": {"move_mode", "x", "y", "delta_x", "delta_y"},
-    "mouse_click": {"x", "y", "match_variable", "button", "count", "interval_ms"},
+    "mouse_click": {
+        "action",
+        "x",
+        "y",
+        "match_variable",
+        "button",
+        "count",
+        "interval_ms",
+        "scroll_direction",
+        "scroll_amount",
+    },
     "key_press": {"key", "modifiers", "hold_ms"},
     "text_input": {"text", "strategy", "interval_ms", "sensitive"},
     "template_match": {
@@ -336,8 +346,19 @@ def _load_step(
             raise WorkflowV2ConfigError(
                 f"{context}.button must be 'left', 'right', or 'middle'."
             )
+        action = data.get("action", "click")
+        if action not in {"click", "scroll"}:
+            raise WorkflowV2ConfigError(
+                f"{context}.action must be 'click' or 'scroll'."
+            )
+        scroll_direction = data.get("scroll_direction", "up")
+        if scroll_direction not in {"up", "down"}:
+            raise WorkflowV2ConfigError(
+                f"{context}.scroll_direction must be 'up' or 'down'."
+            )
         return MouseClickStep(
             **base,
+            action=action,
             x=x,
             y=y,
             match_variable=match_variable,
@@ -345,6 +366,10 @@ def _load_step(
             count=_integer(data, "count", context, default=1, minimum=1, maximum=2),
             interval_ms=_integer(
                 data, "interval_ms", context, default=100, minimum=0, maximum=MAX_TIME_MS
+            ),
+            scroll_direction=scroll_direction,
+            scroll_amount=_integer(
+                data, "scroll_amount", context, default=3, minimum=1, maximum=100
             ),
         )
     if step_type == "key_press":

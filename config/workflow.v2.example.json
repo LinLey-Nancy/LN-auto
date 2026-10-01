@@ -73,6 +73,16 @@
       "hold_ms": 80
     },
     {
+      "id": "scroll-list",
+      "type": "mouse_click",
+      "name": "向下滚动列表",
+      "action": "scroll",
+      "x": 640,
+      "y": 400,
+      "scroll_direction": "down",
+      "scroll_amount": 3
+    },
+    {
       "id": "run-cleanup",
       "type": "run_workflow",
       "name": "执行清理子工作流",

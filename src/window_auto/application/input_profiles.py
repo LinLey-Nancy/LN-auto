@@ -21,7 +21,7 @@ class RunMode(StrEnum):
 
 MODE_LABELS = {
     RunMode.WINDOW: "窗口模式（办公自动化）",
-    RunMode.FULLSCREEN: "全屏模式（游戏防检测）",
+    RunMode.FULLSCREEN: "全屏模式（整屏画面）",
 }
 
 MODE_DESCRIPTIONS = {
@@ -30,8 +30,8 @@ MODE_DESCRIPTIONS = {
         "运行期间不占用物理鼠标键盘。"
     ),
     RunMode.FULLSCREEN: (
-        "对整个屏幕截图并使用前台输入，不与游戏窗口直接交互，"
-        "降低被反作弊检测的风险；运行期间会占用物理鼠标键盘。"
+        "对整个屏幕截图并使用前台输入，不与目标窗口直接交互；"
+        "运行期间会占用物理鼠标键盘。"
         "可选绑定一个窗口，仅用于运行前自动置顶到前台（等价 Alt+Tab）。"
     ),
 }
@@ -154,7 +154,7 @@ INPUT_PROFILES = {
         requires_external_driver=False,
         compatibility="high",
         warning=(
-            "窗口模式和全屏模式均可使用，是全屏模式（游戏）的推荐策略。"
+            "窗口模式和全屏模式均可使用，是全屏模式的推荐策略。"
             "目标画面必须位于前台且不被遮挡，运行期间可能短暂占用物理鼠标和键盘。"
         ),
     ),

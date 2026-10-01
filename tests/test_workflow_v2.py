@@ -81,6 +81,10 @@ class _Controller:
         self.calls.append(("text", text))
         return _Job()
 
+    def post_scroll(self, dx: int, dy: int):
+        self.calls.append(("scroll", dx, dy))
+        return _Job()
+
 
 class _Session:
     def __init__(self) -> None:
@@ -164,6 +168,71 @@ class WorkflowV2LoaderTests(unittest.TestCase):
 
             with self.assertRaises(WorkflowV2ConfigError):
                 load_workflow_v2(path, root)
+
+    def test_scroll_action_is_loaded_with_defaults(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "workflow.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "name": "scroll",
+                        "steps": [
+                            {
+                                "id": "scroll",
+                                "type": "mouse_click",
+                                "name": "scroll down",
+                                "action": "scroll",
+                                "x": 10,
+                                "y": 20,
+                                "scroll_direction": "down",
+                                "scroll_amount": 5,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            definition = load_workflow_v2(path, root)
+
+            step = definition.steps[0]
+            self.assertEqual(step.action, "scroll")
+            self.assertEqual(step.scroll_direction, "down")
+            self.assertEqual(step.scroll_amount, 5)
+
+    def test_scroll_action_rejects_invalid_values(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for field, value in (
+                ("action", "drag"),
+                ("scroll_direction", "left"),
+            ):
+                path = root / "workflow.json"
+                path.write_text(
+                    json.dumps(
+                        {
+                            "version": 2,
+                            "name": "invalid",
+                            "steps": [
+                                {
+                                    "id": "scroll",
+                                    "type": "mouse_click",
+                                    "name": "scroll",
+                                    "action": "scroll",
+                                    "x": 10,
+                                    "y": 20,
+                                    field: value,
+                                }
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with self.assertRaises(WorkflowV2ConfigError):
+                    load_workflow_v2(path, root)
 
     def test_template_match_accepts_retry_failure_policy(self) -> None:
         with TemporaryDirectory() as directory:
@@ -536,6 +605,101 @@ class WorkflowV2ActionTests(unittest.TestCase):
             )
 
         direct_click.assert_called_once_with(session.window, (1711, 949), "left")
+        self.assertEqual(session.controller.calls, [])
+
+    def test_scroll_down_moves_pointer_then_scrolls(self) -> None:
+        session, context = _context()
+
+        result = execute_action(
+            MouseClickStep(
+                id="scroll",
+                name="Scroll",
+                action="scroll",
+                x=100,
+                y=200,
+                scroll_direction="down",
+                scroll_amount=3,
+            ),
+            context,
+        )
+
+        self.assertEqual(
+            session.controller.calls,
+            [("move", 100, 200), ("scroll", 0, -360)],
+        )
+        self.assertEqual(result.output["action"], "scroll")
+        self.assertEqual(result.output["direction"], "down")
+        self.assertEqual(result.output["amount"], 3)
+
+    def test_scroll_up_uses_positive_wheel_delta(self) -> None:
+        session, context = _context()
+
+        execute_action(
+            MouseClickStep(
+                id="scroll",
+                name="Scroll",
+                action="scroll",
+                x=1,
+                y=2,
+                scroll_direction="up",
+                scroll_amount=5,
+            ),
+            context,
+        )
+
+        self.assertIn(("scroll", 0, 600), session.controller.calls)
+
+    def test_scroll_can_target_recognized_match_center(self) -> None:
+        session, context = _context()
+        context.variables["match"] = MatchBox(100, 100, 40, 20)
+
+        execute_action(
+            MouseClickStep(
+                id="scroll",
+                name="Scroll",
+                action="scroll",
+                match_variable="match",
+                scroll_direction="up",
+                scroll_amount=1,
+            ),
+            context,
+        )
+
+        self.assertEqual(
+            session.controller.calls,
+            [("move", 120, 110), ("scroll", 0, 120)],
+        )
+
+    def test_precise_foreground_scroll_uses_direct_screen_input(self) -> None:
+        session, context = _context()
+        session.config = {"controller": {"direct_screen_input": True}}
+        session.window = WindowInfo(
+            hwnd=123,
+            title="Application",
+            class_name="UnrealWindow",
+            window_width=1920,
+            window_height=1080,
+            client_width=1920,
+            client_height=1080,
+            visible=True,
+            minimized=False,
+        )
+
+        with patch("window_auto.workflow.actions.scroll_client_point") as direct_scroll:
+            execute_action(
+                MouseClickStep(
+                    id="scroll",
+                    name="Scroll",
+                    action="scroll",
+                    x=300,
+                    y=400,
+                    scroll_direction="down",
+                    scroll_amount=2,
+                ),
+                context,
+            )
+
+        direct_scroll.assert_called_once_with(session.window, (300, 400), -2)
         self.assertEqual(session.controller.calls, [])
 
     def test_relative_mouse_move_uses_controller_relative_move(self) -> None:

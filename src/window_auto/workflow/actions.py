@@ -23,7 +23,11 @@ from window_auto.runtime.humanize import (
     jitter_point,
     uniform_seconds,
 )
-from window_auto.runtime.win32_input import DirectInputError, click_client_point
+from window_auto.runtime.win32_input import (
+    DirectInputError,
+    click_client_point,
+    scroll_client_point,
+)
 from window_auto.workflow.context import ExecutionContext
 from window_auto.workflow.model import (
     KeyPressStep,
@@ -127,6 +131,49 @@ def _click(
     _successful(
         context.session.controller.post_click(point[0], point[1], contact=contact),
         description,
+    )
+    context.pointer = point
+    return point
+
+
+_WHEEL_NOTCH = 120
+
+
+def _scroll(
+    context: ExecutionContext,
+    point: tuple[int, int],
+    direction: str,
+    amount: int,
+) -> tuple[int, int]:
+    session_config = getattr(context.session, "config", {})
+    controller_config = session_config.get("controller", {})
+    humanize = _humanize(context)
+    if humanize.click_jitter_px:
+        point = jitter_point((int(point[0]), int(point[1])), humanize.click_jitter_px)
+    point = (int(point[0]), int(point[1]))
+    notches = amount if direction == "up" else -amount
+    if controller_config.get("direct_screen_input", False):
+        window = context.session.window
+        if window is None:
+            raise WorkflowActionError(
+                "前台精确输入需要先选择目标窗口，请先点击“选择窗口”。"
+            )
+        try:
+            scroll_client_point(window, point, notches)
+        except DirectInputError as error:
+            raise WorkflowActionError(str(error)) from error
+        context.pointer = point
+        return point
+    if humanize.mouse_curve and context.pointer is not None:
+        _move_pointer_along_curve(context, point)
+    else:
+        _successful(
+            context.session.controller.post_touch_move(point[0], point[1]),
+            f"mouse move to {point}",
+        )
+    _successful(
+        context.session.controller.post_scroll(0, _WHEEL_NOTCH * notches),
+        f"wheel scroll {direction} x{amount} at {point}",
     )
     context.pointer = point
     return point
@@ -518,9 +565,24 @@ def execute_action(step: WorkflowStep, context: ExecutionContext) -> ActionResul
         )
         if point[0] is None or point[1] is None:
             raise WorkflowActionError(
-                "鼠标点击步骤缺少坐标或识别结果变量，请在步骤属性中补全后再运行。"
+                "鼠标操作步骤缺少坐标或识别结果变量，请在步骤属性中补全后再运行。"
             )
         base_point = (int(point[0]), int(point[1]))
+        if step.action == "scroll":
+            point = _scroll(
+                context,
+                base_point,
+                step.scroll_direction,
+                step.scroll_amount,
+            )
+            return ActionResult(
+                {
+                    "action": "scroll",
+                    "point": point,
+                    "direction": step.scroll_direction,
+                    "amount": step.scroll_amount,
+                }
+            )
         for click_index in range(step.count):
             point = _click(
                 context,

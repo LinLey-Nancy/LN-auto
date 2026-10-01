@@ -754,8 +754,8 @@ class MainWindow(QMainWindow):
                 )
             else:
                 focus_line = (
-                    "未绑定置顶窗口：请保持游戏位于前台；"
-                    "独占全屏游戏失焦后会被系统最小化。\n"
+                    "未绑定置顶窗口：请保持目标画面位于前台；"
+                    "全屏显示的目标失焦后可能被系统最小化。\n"
                 )
         warning = (
             f"模式：{MODE_LABELS[self.target_mode]}\n"

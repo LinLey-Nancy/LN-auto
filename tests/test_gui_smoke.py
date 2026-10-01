@@ -288,6 +288,36 @@ class GuiSmokeTests(unittest.TestCase):
         window.document.dirty = False
         window.close()
 
+    def test_mouse_action_step_switches_between_click_and_scroll_fields(self) -> None:
+        window = MainWindow()
+        window.palette.setCurrentRow(2)
+        window.add_selected_action()
+
+        self.assertEqual(window.document.steps[0]["type"], "mouse_click")
+        action_combo = next(
+            control
+            for control in window.properties.findChildren(QComboBox)
+            if control.accessibleName() == "操作方式"
+        )
+        labels = {
+            label.text() for label in window.properties.findChildren(QLabel)
+        }
+        self.assertIn("鼠标按键：", labels)
+        self.assertNotIn("滚动方向：", labels)
+
+        action_combo.setCurrentIndex(action_combo.findData("scroll"))
+        QApplication.processEvents()
+        labels = {
+            label.text() for label in window.properties.findChildren(QLabel)
+        }
+        self.assertIn("滚动方向：", labels)
+        self.assertIn("滚动格数：", labels)
+        self.assertNotIn("鼠标按键：", labels)
+        self.assertEqual(window.document.steps[0]["action"], "scroll")
+
+        window.document.dirty = False
+        window.close()
+
     def test_run_workflow_step_has_file_picker(self) -> None:
         window = MainWindow()
         window.palette.setCurrentRow(6)
@@ -405,6 +435,19 @@ class GuiSmokeTests(unittest.TestCase):
                 {"type": "mouse_click", "x": 100, "y": 200, "button": "left", "count": 1}
             ),
             "左键点击 (100, 200)",
+        )
+        self.assertEqual(
+            summarize_step(
+                {
+                    "type": "mouse_click",
+                    "action": "scroll",
+                    "x": 640,
+                    "y": 400,
+                    "scroll_direction": "down",
+                    "scroll_amount": 3,
+                }
+            ),
+            "滚轮向下滚动 3 格 (640, 400)",
         )
         self.assertEqual(
             summarize_step(
@@ -668,7 +711,7 @@ class GuiSmokeTests(unittest.TestCase):
 
         bound = WindowInfo(
             hwnd=0x1234,
-            title="游戏大厅",
+            title="示例窗口",
             class_name="GameWindow",
             window_width=1920,
             window_height=1080,
@@ -680,7 +723,7 @@ class GuiSmokeTests(unittest.TestCase):
         dialog = RunSettingsDialog(
             RunMode.FULLSCREEN, bound, InputProfileName.FOREGROUND_COMPATIBLE
         )
-        self.assertIn("游戏大厅", dialog.window_label.text())
+        self.assertIn("示例窗口", dialog.window_label.text())
         self.assertFalse(dialog.clear_window_button.isHidden())
 
         dialog.clear_window_button.click()
@@ -751,7 +794,7 @@ class GuiSmokeTests(unittest.TestCase):
 
         bound = WindowInfo(
             hwnd=0x1234,
-            title="游戏大厅",
+            title="示例窗口",
             class_name="GameWindow",
             window_width=1920,
             window_height=1080,

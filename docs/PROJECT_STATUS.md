@@ -14,22 +14,26 @@ LN-auto 是一个基于 MaaFramework 的 Windows 桌面自动化工具。最终�
 
 项目以“输入发送成功不等于目标应用已经处理输入”为安全原则。正式流程应通过模板、截图变化或其他可观测状态验证操作结果。
 
+## 2026-10-01 更新内容
+
+- 「鼠标点击」步骤升级为「鼠标操作」：`mouse_click` 步骤新增 `action` 字段（`click` 默认 / `scroll`），滚动支持 `scroll_direction`（up/down）与 `scroll_amount`（1–100 格），位置同样支持固定坐标或识别结果变量。执行层：Maa 通道先 `post_touch_move` 定位再 `post_scroll(0, ±120×格数)`（修复了拟人曲线开启但指针位置未知时滚动前不移动的问题）；前台精确直连通道新增 `win32_input.scroll_client_point`（ClientToScreen + SetCursorPos + `mouse_event` 滚轮）。GUI：属性面板按操作方式动态显隐「鼠标按键/点击次数/间隔」与「滚动方向/滚动格数」，步骤摘要显示「滚轮向下滚动 3 格 (640, 400)」。loader 严格校验新字段；`config/workflow.v2.example.json` 追加滚动示例。269 项 pytest 通过。
+
 ## 2026-09-30 更新内容
 
 **已发布 v0.3.2**：提交 `34cd8be`（feat: 运行模式）、`1e6141c`（chore: 发布 v0.3.2）与 tag `v0.3.2` 已推送 GitHub；`dist/LN-auto-v0.3.2-Setup.exe`（75.1MB）构建成功，冻结版 offscreen smoke 通过；GitHub Release 已创建（非草稿），资产 78,739,687 字节与本地一致。
 
 - 引入「运行模式」策略（菜单「运行 → 运行设置…」），替代原先工具栏上独立的「截图方式」下拉：
   - **窗口模式（办公自动化）**：必须选择目标窗口；窗口级截图（FramePool+PrintWindow，可被遮挡/后台），`screencap_mode=background` + `capture_scope=window`；五种输入策略全部可选，默认前台精确点击。
-  - **全屏模式（游戏防检测）**：无需选择窗口，目标为「整个屏幕」——新增 `windowing/discovery.desktop_window_info()` 返回桌面伪窗口（`GetDesktopWindow` 句柄，客户区原点 (0,0)、尺寸即屏幕尺寸），使既有 desktop scope 坐标映射退化为纯缩放，`workflow/actions.py` 与 `runtime/win32_controller.py` 零改动复用；截图强制屏幕级（`screencap_mode=foreground` + `capture_scope=desktop`，截图方法覆盖为 DXGI_DesktopDup/ScreenDC，不触碰游戏窗口）；输入策略仅保留前台兼容（Seize，默认）与驱动级——后台消息与前台精确点击依赖窗口句柄/客户区，全屏模式下不提供。
+  - **全屏模式（整屏画面）**：无需选择窗口，目标为「整个屏幕」——新增 `windowing/discovery.desktop_window_info()` 返回桌面伪窗口（`GetDesktopWindow` 句柄，客户区原点 (0,0)、尺寸即屏幕尺寸），使既有 desktop scope 坐标映射退化为纯缩放，`workflow/actions.py` 与 `runtime/win32_controller.py` 零改动复用；截图强制屏幕级（`screencap_mode=foreground` + `capture_scope=desktop`，截图方法覆盖为 DXGI_DesktopDup/ScreenDC，不触碰目标窗口）；输入策略仅保留前台兼容（Seize，默认）与驱动级——后台消息与前台精确点击依赖窗口句柄/客户区，全屏模式下不提供。
   - 模式与输入策略经 QSettings（`run/target_mode`、`run/input_profile`）持久化；运行确认对话框显示模式、目标、输入策略与派生截图方式；CLI 行为不变（仍读 `config/default.json`）。
 - 主工具栏精简：目标窗口标签、选择窗口按钮、输入策略下拉、截图方式下拉全部收进「运行设置」弹窗；工具栏只保留新建/打开/保存、只读目标摘要和停止/运行。菜单栏新增「运行」菜单（运行设置…、运行工作流 F5、停止），运行期间运行设置入口禁用。
 - 状态栏鼠标坐标按模式区分：窗口模式且已选窗口时显示「窗口内 X/Y」（屏幕坐标减去 `live_client_origin()` 实时客户区原点，可直接填入步骤），全屏模式或未选窗口时显示「屏幕 X/Y」。注意两种模式坐标系不同，跨模式复用工作流/模板需重新取点。
-- 全屏模式修复「运行即跳桌面」缺陷（用户实测反馈）：确认弹窗/编辑器夺走焦点后，独占全屏游戏被系统失焦最小化，而全屏模式链路没有任何一步把游戏拉回前台（窗口模式由前台精确策略的 `SetForegroundWindow` 隐含完成）。修复：全屏模式可**可选绑定一个聚焦窗口**，运行确认后线程启动前经新增的 `runtime/win32_input.foreground_window()`（SW_RESTORE + BringWindowToTop + SetForegroundWindow 重试环）将其置顶——该操作为 shell 级，等价 Alt+Tab，不触碰游戏进程、不在窗口级反作弊检测面上；弹窗中提供「清除」解绑，未绑定时确认对话框提示需自行保持游戏前台。窗口模式语义不变（选择窗口仍为必选）。**已发布 v0.3.3**：提交 `822637f`（fix）、`fbe159f`（chore: 发布 v0.3.3）与 tag `v0.3.3` 已推送；`dist/LN-auto-v0.3.3-Setup.exe`（75.1MB）构建成功，冻结版 offscreen smoke 通过；GitHub Release 已创建（非草稿），资产 78,744,826 字节与本地一致（脚本 `debug/create_release_v033.py`）。
+- 全屏模式修复「运行即跳桌面」缺陷（用户实测反馈）：确认弹窗/编辑器夺走焦点后，独占全屏的目标程序被系统失焦最小化，而全屏模式链路没有任何一步把目标拉回前台（窗口模式由前台精确策略的 `SetForegroundWindow` 隐含完成）。修复：全屏模式可**可选绑定一个聚焦窗口**，运行确认后线程启动前经新增的 `runtime/win32_input.foreground_window()`（SW_RESTORE + BringWindowToTop + SetForegroundWindow 重试环）将其置顶——该操作为 shell 级，等价 Alt+Tab，不触碰目标进程、不做窗口级交互；弹窗中提供「清除」解绑，未绑定时确认对话框提示需自行保持目标位于前台。窗口模式语义不变（选择窗口仍为必选）。**已发布 v0.3.3**：提交 `822637f`（fix）、`fbe159f`（chore: 发布 v0.3.3）与 tag `v0.3.3` 已推送；`dist/LN-auto-v0.3.3-Setup.exe`（75.1MB）构建成功，冻结版 offscreen smoke 通过；GitHub Release 已创建（非草稿），资产 78,744,826 字节与本地一致（脚本 `debug/create_release_v033.py`）。
 - 修复全屏模式点击落点恒为 1.5 倍的错位（用户实测反馈）：实机诊断（`debug/diag_fullscreen_chain.py`，控制器移动光标后读回物理位置）确认 **Maa Win32 Seize 输入按「缩放后截图空间」解释坐标**——`screenshot_target_long_side=1280` 时坐标被放大 1920/1280=1.5×，即 7 月记录的「Seize 二次坐标映射」现象的机制根因。修复：新增控制器配置键 `controller_target_long_side`（缺省回退 `screenshot_target_long_side`），全屏模式将其钉到桌面原始长边，使 Maa 截图空间=物理像素、Seize 坐标恒等（诊断复测落点误差 ≤1px，为 SendInput 归一化取整）；识别仍走 PIL 按 1280 长边缩放，既有 1280 基准模板不受影响，Maa 全尺寸截图仅用于连接自检。已知遗留：窗口模式的「前台兼容（Seize）」策略受同一机制影响，本次未改（窗口模式推荐前台精确策略）；状态栏坐标改用 `GetCursorPos` 物理像素（`physical_cursor_pos()`），消除 Qt 逻辑坐标在高分屏下的偏差。
 
 ## 2026-09-28 更新内容
 
-- 主工具栏新增「截图方式」下拉（输入策略右侧）：「窗口截图（可被遮挡）」对应 `controller.screencap_mode = background`（FramePool+PrintWindow，现状默认），「全屏截图（屏幕级，窗口须可见）」对应 `foreground`（DXGI_DesktopDup_Window+ScreenDC，屏幕级截取、不直接与目标窗口交互）。动机：FramePool 会对游戏窗口建立 Windows.Graphics.Capture 捕获会话、PrintWindow 会向目标窗口发 WM_PRINT，均是反作弊的主要检测面；屏幕级截图等价于普通截屏工具，不触碰目标窗口。选择经 QSettings `run/screencap_mode` 持久化（默认 background），`run_workflow` 加载配置后按选择覆盖 `screencap_mode`，运行确认对话框同步显示所选截图方式。CLI 行为不变（仍读 `config/default.json`）。取舍：全屏截图要求目标窗口可见且不被遮挡。
+- 主工具栏新增「截图方式」下拉（输入策略右侧）：「窗口截图（可被遮挡）」对应 `controller.screencap_mode = background`（FramePool+PrintWindow，现状默认），「全屏截图（屏幕级，窗口须可见）」对应 `foreground`（DXGI_DesktopDup_Window+ScreenDC，屏幕级截取、不直接与目标窗口交互）。动机：FramePool 会对目标窗口建立 Windows.Graphics.Capture 捕获会话、PrintWindow 会向目标窗口发 WM_PRINT，均会直接与目标窗口交互；屏幕级截图等价于普通截屏工具，不触碰目标窗口。选择经 QSettings `run/screencap_mode` 持久化（默认 background），`run_workflow` 加载配置后按选择覆盖 `screencap_mode`，运行确认对话框同步显示所选截图方式。CLI 行为不变（仍读 `config/default.json`）。取舍：全屏截图要求目标窗口可见且不被遮挡。
 
 ## 2026-09-27 更新内容
 

@@ -90,7 +90,7 @@ def desktop_window_info() -> WindowInfo:
 
     The desktop window handle lets the Maa Win32 controller use screen-level
     screencap methods (DXGI_DesktopDup / ScreenDC) without touching any
-    application window, which is the fullscreen game mode target.
+    application window, which is the fullscreen mode target.
     """
     if sys.platform != "win32":
         raise RuntimeError("Desktop window discovery is only supported on Windows.")

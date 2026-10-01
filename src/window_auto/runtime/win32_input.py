@@ -76,6 +76,71 @@ def foreground_window(window: WindowInfo) -> None:
     )
 
 
+_WHEEL_DELTA = 120
+
+
+def scroll_client_point(
+    window: WindowInfo,
+    point: tuple[int, int],
+    notches: int,
+) -> tuple[int, int]:
+    """Scroll the wheel at an exact client point in screen pixels.
+
+    ``notches`` counts wheel steps; positive scrolls up, negative down.
+    """
+    if sys.platform != "win32":
+        raise DirectInputError("前台精确滚动仅支持 Windows 系统。")
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    hwnd = wintypes.HWND(window.hwnd)
+    user32.IsWindow.argtypes = [wintypes.HWND]
+    user32.IsWindow.restype = wintypes.BOOL
+    user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(_Rect)]
+    user32.GetClientRect.restype = wintypes.BOOL
+    user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+    user32.ClientToScreen.restype = wintypes.BOOL
+    user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+    user32.SetCursorPos.restype = wintypes.BOOL
+    user32.mouse_event.argtypes = [
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+
+    if not user32.IsWindow(hwnd):
+        raise DirectInputError("目标窗口已关闭或不存在，未发送滚动。请重新选择目标窗口后重试。")
+
+    rect = _Rect()
+    if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+        raise DirectInputError(
+            "无法读取目标窗口的客户区尺寸，未发送滚动。请重新选择目标窗口后重试。"
+        )
+    width = max(0, rect.right - rect.left)
+    height = max(0, rect.bottom - rect.top)
+    x, y = point
+    if not 0 <= x < width or not 0 <= y < height:
+        raise DirectInputError(
+            f"滚动坐标 {point} 超出目标窗口当前客户区 {width}×{height}，未发送滚动。"
+        )
+
+    screen_point = wintypes.POINT(x, y)
+    if not user32.ClientToScreen(hwnd, ctypes.byref(screen_point)):
+        raise DirectInputError(
+            "无法把滚动坐标换算为屏幕坐标，未发送滚动。请重新选择目标窗口后重试。"
+        )
+    if not user32.SetCursorPos(screen_point.x, screen_point.y):
+        raise DirectInputError(
+            "Windows 拒绝移动鼠标光标，未发送滚动。"
+            "通常是权限不足：目标程序可能以管理员身份运行，"
+            "请尝试以管理员身份运行 LN-auto 后重试。"
+        )
+    time.sleep(0.03)
+    user32.mouse_event(0x0800, 0, 0, _WHEEL_DELTA * notches, None)
+    return int(screen_point.x), int(screen_point.y)
+
+
 def click_client_point(
     window: WindowInfo,
     point: tuple[int, int],

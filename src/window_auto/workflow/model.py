@@ -63,12 +63,15 @@ class MouseMoveStep(StepBase):
 
 @dataclass(frozen=True, slots=True)
 class MouseClickStep(StepBase):
+    action: Literal["click", "scroll"] = "click"
     x: int | None = None
     y: int | None = None
     match_variable: str | None = None
     button: Literal["left", "right", "middle"] = "left"
     count: int = 1
     interval_ms: int = 100
+    scroll_direction: Literal["up", "down"] = "up"
+    scroll_amount: int = 3
     kind: Literal["mouse_click"] = field(default="mouse_click", init=False)
 
 

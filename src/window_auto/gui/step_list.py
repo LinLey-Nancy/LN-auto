@@ -26,7 +26,7 @@ TYPE_COLORS = {
 TYPE_TAGS = {
     "template_match": "模板",
     "mouse_move": "移动",
-    "mouse_click": "点击",
+    "mouse_click": "操作",
     "key_press": "按键",
     "text_input": "文本",
     "wait": "延迟",
@@ -57,11 +57,14 @@ def summarize_step(step: dict[str, Any]) -> str:
             return f"相对移动 ({step.get('delta_x', 0):+}, {step.get('delta_y', 0):+})"
         return f"移动到 ({step.get('x', 0)}, {step.get('y', 0)})"
     if step_type == "mouse_click":
-        button = _button_label(step.get("button", "left"))
         if step.get("match_variable"):
             target = f"识别结果「{step['match_variable']}」"
         else:
             target = f"({step.get('x', 0)}, {step.get('y', 0)})"
+        if step.get("action") == "scroll":
+            direction = "向上" if step.get("scroll_direction", "up") == "up" else "向下"
+            return f"滚轮{direction}滚动 {int(step.get('scroll_amount', 3) or 3)} 格 {target}"
+        button = _button_label(step.get("button", "left"))
         count = int(step.get("count", 1) or 1)
         verb = "双击" if count == 2 else "点击"
         return f"{button}{verb} {target}"
